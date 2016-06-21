@@ -10,12 +10,10 @@ import (
 	"go/parser"
 	"go/token"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
-	"time"
 )
 
 const (
@@ -69,20 +67,23 @@ NOTES
     tables.go file.
         //go:generate scaneo $GOFILE
 `
-	ALIAS = "alias"
-	TABLE = "table"
-	FK    = "fk"
+	COLUMN = "column"
+	TABLE  = "table"
+	FK     = "fk"
+	LINK   = "link"
 )
 
 type fieldToken struct {
-	Name   string
-	Type   string
-	Slice  bool
-	Column string
-	Table  string
-	Alias  string
-	Fk     string
-	Link   string
+	Name      string
+	Type      string
+	Slice     bool
+	Column    string
+	Table     string
+	Alias     string
+	Fk        string
+	Link      string
+	LinkAlias string
+	RelAlias  string
 }
 
 type structToken struct {
@@ -191,7 +192,7 @@ func main() {
 			}
 			newStructTk.Composite = true
 			emb := structLookup[embeddedStruct]
-			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: tableAlias(), Type: embeddedStruct}
+			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: sf.RelAlias, Type: embeddedStruct}
 			var embeddedIdColumn string
 			for _, field := range emb.Fields {
 				//only 1 layer
@@ -220,7 +221,7 @@ func main() {
 			if isSlice {
 				//manytomaany
 				if sf.Link != "" {
-					rel.LinkAlias = tableAlias()
+					rel.LinkAlias = sf.LinkAlias
 					rel.From = newStructTk.IdColumn
 					rel.LinkTo = embeddedIdColumn
 					linkStruct := structLookup[sf.Link]
@@ -393,9 +394,9 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 
 			// iterate through struct fields (1 line at a time)
 			for _, fieldLine := range structType.Fields.List {
-				if table := tableName(fieldLine.Tag.Value); table != "" {
+				if table, tableAlias := tableName(fieldLine.Tag.Value); table != "" {
 					structTok.Table = table
-					structTok.Alias = tableAlias()
+					structTok.Alias = tableAlias
 				}
 				fieldToks := make([]*fieldToken, len(fieldLine.Names))
 
@@ -428,8 +429,8 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 				}
 
 				column := columnName(fieldLine.Tag.Value)
-				fk := foreignKey(fieldLine.Tag.Value)
-				link := linkTable(fieldLine.Tag.Value)
+				fk, relAlias := foreignKey(fieldLine.Tag.Value)
+				link, linkAlias := linkTable(fieldLine.Tag.Value)
 				// apply type to all variables declared in this line
 				for i := range fieldToks {
 					fieldToks[i].Type = fieldType
@@ -441,9 +442,11 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 					if fk != "" {
 						fieldToks[i].Fk = fk
 						fieldToks[i].Column = fk
+						fieldToks[i].RelAlias = relAlias
 					}
 					if link != "" {
 						fieldToks[i].Link = link
+						fieldToks[i].LinkAlias = linkAlias
 					}
 					if fieldToks[i].Name == "ID" {
 						structTok.IdColumn = fieldToks[i].Column
@@ -496,30 +499,37 @@ func fieldTags(tag string) [][]string {
 	return tags
 }
 
+//column has only one possible value
 func columnName(tag string) string {
-	return tagValue(tag, ALIAS)
+	values := tagValues(tag, COLUMN)
+	return values[0]
 }
 
-func tableName(tag string) string {
-	return tagValue(tag, TABLE)
+//tabletag has 2 mandatory values eg table and alias
+func tableName(tag string) (string, string) {
+	values := tagValues(tag, TABLE)
+	return values[0], values[1]
 }
 
-func foreignKey(tag string) string {
-	return tagValue(tag, FK)
+func foreignKey(tag string) (string, string) {
+	values := tagValues(tag, FK)
+	return values[0], values[1]
 }
 
-func linkTable(tag string) string {
-	return tagValue(tag, "link")
+func linkTable(tag string) (string, string) {
+	values := tagValues(tag, LINK)
+	return values[0], values[1]
 }
 
-func tagValue(tag string, prop string) string {
+func tagValues(tag string, prop string) []string {
 	tags := fieldTags(tag)
 	for _, tag := range tags {
 		if tag[0] == prop {
-			return tag[1]
+			values := strings.Split(tag[1], ",")
+			return values
 		}
 	}
-	return ""
+	return []string{}
 }
 
 func parseArray(fieldType *ast.ArrayType) string {
@@ -737,35 +747,4 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 	}
 
 	return nil
-}
-
-const letterBytes = "abcdefghijklmnopqrstuvwxyz"
-const (
-	letterIdxBits = 6                    // 6 bits to represent a letter index
-	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
-	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
-)
-
-var src rand.Source = rand.NewSource(time.Now().UnixNano())
-
-func randString(n int) string {
-	b := make([]byte, n)
-	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
-	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
-		if remain == 0 {
-			cache, remain = src.Int63(), letterIdxMax
-		}
-		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
-			b[i] = letterBytes[idx]
-			i--
-		}
-		cache >>= letterIdxBits
-		remain--
-	}
-
-	return string(b)
-}
-
-func tableAlias() string {
-	return randString(2)
 }
