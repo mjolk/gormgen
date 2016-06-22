@@ -242,6 +242,7 @@ func main() {
 						}
 						if field.Link == emb.Name {
 							rel.LinkFrom = field.Column
+							rel.Alias = field.LinkAlias
 						}
 					}
 					newStructTk.ManyToMany = addRelation(newStructTk.ManyToMany, rel)
@@ -502,23 +503,36 @@ func fieldTags(tag string) [][]string {
 //column has only one possible value
 func columnName(tag string) string {
 	values := tagValues(tag, COLUMN)
-	return values[0]
+	if len(values) > 0 {
+		return values[0]
+	}
+	return ""
 }
 
 //tabletag has 2 mandatory values eg table and alias
 func tableName(tag string) (string, string) {
 	values := tagValues(tag, TABLE)
-	return values[0], values[1]
+	if len(values) > 1 {
+		return values[0], values[1]
+	}
+	return "", ""
 }
 
 func foreignKey(tag string) (string, string) {
 	values := tagValues(tag, FK)
-	return values[0], values[1]
+	if len(values) > 1 {
+		return values[0], values[1]
+
+	}
+	return "", ""
 }
 
 func linkTable(tag string) (string, string) {
 	values := tagValues(tag, LINK)
-	return values[0], values[1]
+	if len(values) > 1 {
+		return values[0], values[1]
+	}
+	return "", ""
 }
 
 func tagValues(tag string, prop string) []string {
