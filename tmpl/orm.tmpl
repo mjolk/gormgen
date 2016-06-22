@@ -83,7 +83,8 @@ func Query{{title .Name}}(query string, params []interface{}) (*{{.Name}}, error
 type proxy{{.Name}} struct {
 	*{{.Name}}{{range .OneToMany}}
 	proxy{{.Field}} *{{.Type}}{{end}}{{range .ManyToMany}}
-        proxy{{.Field}} *{{.Type}}{{end}}
+        proxy{{.Field}} *{{.Type}}
+	proxy{{.LinkField}} *{{.LinkType}}{{end}}
 }
 
 func {{$.Visibility}}oad{{title .Name}}(rs *sql.Rows) (*{{.Name}}, error) {
@@ -101,7 +102,7 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 	var err error
 	result := make([]*{{.Name}}, 25)
 	for rs.Next() {
-		s := proxy{{.Name}}{ {{.Name}}:&{{.Name}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{}{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{}{{end}}{{if gt $mm 0}},{{end}}
+		s := proxy{{.Name}}{ {{.Name}}:&{{.Name}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{}{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{}, proxy{{.LinkField}}:&{{.LinkType}}{}{{end}}{{if gt $mm 0}},{{end}}
 		}
 		if err = rs.Scan({{range .Fields}}
 			&s.{{.Name}},{{end}}
@@ -128,6 +129,23 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 			if !{{.Field}}Exists {
 				{{$i:=.Field}}new{{.Type}} := &{{.Type}}{
 					{{range $fields}}{{$prox:=proxy .Name}}{{if eq $prox $i}}{{field .Name}}: s.proxy{{$i}}.{{field .Name}},{{end}}{{end}}
+				}
+				entity.{{.Field}} = append(entity.{{.Field}}, new{{.Type}})
+			}
+		}{{end}}{{range .ManyToMany}}
+		{{.Field}}Exists := false
+		if s.proxy{{.Field}}.ID != 0 {
+			if len(entity.{{.Field}}) > 0 {
+				for _, rel := range entity.{{.Field}} {
+					if rel.ID == s.proxy{{.Field}}.ID {
+						{{.Field}}Exists = true	
+					}	
+				}
+			}
+			if !{{.Field}}Exists { {{$filtrd := ffilter $fields .Field}}{{$mmf := .Field}}{{$lfilterd := ffilter $fields .LinkField}}{{$lmf := .LinkField}}
+				new{{.Type}} := &{{.Type}}{
+					{{range $a, $b := $filtrd}}{{if $a}}, {{end}}{{field .Name}}: s.proxy{{$mmf}}.{{field .Name}}{{end}},
+					{{range $c, $d := $lfilterd}}{{if $c}}, {{end}}{{field .Name}}: s.proxy{{$lmf}}.{{field .Name}}{{end}},
 				}
 				entity.{{.Field}} = append(entity.{{.Field}}, new{{.Type}})
 			}

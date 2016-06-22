@@ -99,6 +99,8 @@ type structToken struct {
 }
 
 type relation struct {
+	LinkField string
+	LinkType  string
 	Field     string
 	Type      string
 	Table     string
@@ -224,19 +226,21 @@ func main() {
 					rel.LinkAlias = sf.LinkAlias
 					rel.From = newStructTk.IdColumn
 					rel.LinkTo = embeddedIdColumn
+					rel.LinkType = sf.Link
+					rel.LinkField = sf.Link
 					linkStruct := structLookup[sf.Link]
 					rel.LinkTable = linkStruct.Table
 					for _, field := range linkStruct.Fields {
 						//toDO add linkfields???
-						//name := "proxy" + sf.Link + "." + field.Name
-						/*nf := fieldToken{
+						name := "proxy" + sf.Link + "." + field.Name
+						nf := &fieldToken{
 							Name:   name,
 							Type:   field.Type,
 							Column: field.Column,
 							Table:  field.Table,
-							Alias:  field.Alias,
+							Alias:  sf.LinkAlias,
 						}
-						newStructTk.Fields = append(newStructTk.Fields, nf)*/
+						newStructTk.Fields = append(newStructTk.Fields, nf)
 						if field.Link == newStructTk.Name {
 							rel.To = field.Column
 						}
@@ -395,6 +399,10 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 
 			// iterate through struct fields (1 line at a time)
 			for _, fieldLine := range structType.Fields.List {
+				column := columnName(fieldLine.Tag.Value)
+				if column == "-" {
+					continue
+				}
 				if table, tableAlias := tableName(fieldLine.Tag.Value); table != "" {
 					structTok.Table = table
 					structTok.Alias = tableAlias
@@ -429,7 +437,6 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 					continue
 				}
 
-				column := columnName(fieldLine.Tag.Value)
 				fk, relAlias := foreignKey(fieldLine.Tag.Value)
 				link, linkAlias := linkTable(fieldLine.Tag.Value)
 				// apply type to all variables declared in this line
@@ -744,6 +751,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 		"ffilterid":         FilterFieldsAndIDs,
 		"field":             FieldOnly,
 		"proxy":             ProxyType,
+		"ffilter":           FilterFields,
 		"native":            NativeField,
 		"plus1": func(x int) int {
 			return x + 1
