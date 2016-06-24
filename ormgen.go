@@ -724,13 +724,13 @@ func FilterFields(fields []*fieldToken, entityType string) []*fieldToken {
 	return fts
 }
 
-func AndObjectType(rels []*relation) *relation {
+func AttributeAlias(rels []*relation) string {
 	for _, rel := range rels {
-		if rel.Type == "ObjectType" {
-			return rel
+		if rel.Type == "Attribute" {
+			return rel.Alias
 		}
 	}
-	return nil
+	return ""
 }
 
 //lookup first part field Name (check '.') in relations referencing Field =>switch global alias for relation alias
@@ -864,7 +864,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 		"proxy":             ProxyType,
 		"ffilter":           FilterFields,
 		"native":            NativeField,
-		"objecttype":        AndObjectType,
+		"attributealias":    AttributeAlias,
 		"plus1": func(x int) int {
 			return x + 1
 		},
