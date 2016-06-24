@@ -19,8 +19,8 @@ func Query{{title .Name}}s(query string, params []interface{}) ([]*{{.Name}}, er
 	return Load{{title .Name}}s(rows)
 }
 
-func {{.Name}}From() string {
-	return `FROM {{.Table}} {{.Alias}}{{$mt:=.Alias}}{{range .OneToMany}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{range .ManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{$mt}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}`
+func {{.Name}}From() string { {{$basetpe := .Name}}
+	return `FROM {{.Table}} {{.Alias}}{{$mt:=.Alias}}{{range .OneToMany}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{if .IsAttribute}}{{$objtpe := objecttype .ManyToOne}}{{if $objtpe }} AND {{$objtpe.Alias}}.name = '{{$basetpe}}'{{end}}{{end}}{{$mtttt := .Alias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToOne}}{{$mtt := .Alias}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{$mt}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{$mttt := .Alias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
 }
 
 func {{.Name}}Select() string { {{$tok := .}}
@@ -37,14 +37,13 @@ func Insert{{title .Name}}(entity *{{.Name}}) (err error) {
 		_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .OneToMany}}{{$tpe:=.Field}}{{$aliasOm:=.Alias}}
 		if len(entity.{{.Field}}) > 0 {
 			for _, rel := range entity.{{.Field}} {
-				_, err = Dbase().Exec(`INSERT INTO {{.Table}}{{$filtered := ffilterid $fields $tpe}}({{range $fin, $flde := $filtered}}{{if $fin}}, {{end}} {{$flde.Column}}{{end}})
-			       VALUES({{range $finx, $fldex := $filtered}}{{if $finx}}, {{end}}${{plus1 $finx}}{{end}})`, 
-			        {{range $finxx, $fldexx := $filtered}}{{if $finxx}}, {{end}}rel.{{field .Name}}{{end}})
+				err = Insert{{.Type}}(rel)
 			}
 		}{{end}}{{range .ManyToMany}}
 		if len(entity.{{.Field}}) > 0 {
 			for _, rel := range entity.{{.Field}} {
-				_, err = Dbase().Exec(`INSERT INTO {{.LinkTable}} ({{.To}}, {{.LinkFrom}}) VALUES($1, $2)`, entity.ID, rel.ID) 
+				_, err = Dbase().Exec(`INSERT INTO {{.LinkTable}} ({{.To}}, {{.LinkFrom}}) VALUES($1, $2)`, entity.ID, rel.ID)
+				err = Insert{{.Type}}(rel)
 			}
 		}{{end}}
 		return err
@@ -58,7 +57,7 @@ func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffil
 	return Transact(func (*sql.Tx) error { {{$l := len $natfields}}
 		queryPrts := make([]string, 0)
 		updateFields := make([]interface{}, 0)
-		{{range $fi, $fld := $natfields}}{{$isbool := isbool .Type}}{{if not $isbool}}if entity.{{.Name}} != {{if isint .Type}}0{{else if isstring .Type}}""{{else}}nil{{end}} {
+		{{range $fi, $fld := $natfields}}{{$isbool := isbool .Type}}{{if not $isbool}}{{if istime .Type}}if entity.{{.Name}}.IsZero(){{else}}if entity.{{.Name}} != {{if isint .Type}}0{{else if isstring .Type}}""{{else}}nil{{end}}{{end}} {
 			queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`)
 			updateFields = append(updateFields, entity.{{.Name}})
 		}{{else}}
@@ -102,7 +101,9 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 	var err error
 	result := make([]*{{.Name}}, 25)
 	for rs.Next() {
-		s := proxy{{.Name}}{ {{.Name}}:&{{.Name}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{}{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{}, proxy{{.LinkField}}:&{{.LinkType}}{}{{end}}{{if gt $mm 0}},{{end}}
+		s := proxy{{.Name}}{ 
+			{{.Name}}:&{{.Name}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}
+				{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }, proxy{{.LinkField}}:&{{.LinkType}}{}{{end}}{{if gt $mm 0}},{{end}}
 		}
 		if err = rs.Scan({{range .Fields}}
 			&s.{{.Name}},{{end}}
@@ -126,13 +127,14 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 					}
 				}
 			}
-			if !{{.Field}}Exists {
-				{{$i:=.Field}}new{{.Type}} := &{{.Type}}{
-					{{range $fields}}{{$prox:=proxy .Name}}{{if eq $prox $i}}{{field .Name}}: s.proxy{{$i}}.{{field .Name}},{{end}}{{end}}
-				}
+			if !{{.Field}}Exists { {{$omfiltrd := ffilter $fields .Field}}{{$omntpe := .Type}}
+				new{{.Type}} := &{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }
+				{{range $a, $b := $omfiltrd}}{{if $a}}
+				{{end}}new{{$omntpe}}.{{fieldshift .Name}} = s.{{.Name}}{{end}}
 				entity.{{.Field}} = append(entity.{{.Field}}, new{{.Type}})
 			}
-		}{{end}}{{range .ManyToMany}}
+		}
+		{{end}}{{range .ManyToMany}}
 		{{.Field}}Exists := false
 		if s.proxy{{.Field}}.ID != 0 {
 			if len(entity.{{.Field}}) > 0 {
@@ -142,11 +144,12 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 					}	
 				}
 			}
-			if !{{.Field}}Exists { {{$filtrd := ffilter $fields .Field}}{{$mmf := .Field}}{{$lfilterd := ffilter $fields .LinkField}}{{$lmf := .LinkField}}
-				new{{.Type}} := &{{.Type}}{
-					{{range $a, $b := $filtrd}}{{if $a}}, {{end}}{{field .Name}}: s.proxy{{$mmf}}.{{field .Name}}{{end}},
-					{{range $c, $d := $lfilterd}}{{if $c}}, {{end}}{{field .Name}}: s.proxy{{$lmf}}.{{field .Name}}{{end}},
-				}
+			if !{{.Field}}Exists { {{$filtrd := ffilter $fields .Field}}{{$lfilterd := ffilter $fields .LinkField}}{{$ntpe := .Type}}
+				new{{.Type}} := &{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }
+				{{range $a, $b := $filtrd}}{{if $a}}
+				{{end}}new{{$ntpe}}.{{fieldshift .Name}} = s.{{.Name}}{{end}}
+				{{range $c, $d := $lfilterd}}{{if $c}}
+				{{end}}new{{$ntpe}}.{{fieldshift .Name}} = s.{{.Name}}{{end}}
 				entity.{{.Field}} = append(entity.{{.Field}}, new{{.Type}})
 			}
 		}

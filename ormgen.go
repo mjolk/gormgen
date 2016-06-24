@@ -99,18 +99,20 @@ type structToken struct {
 }
 
 type relation struct {
-	LinkField string
-	LinkType  string
-	Field     string
-	Type      string
-	Table     string
-	LinkTable string
-	LinkAlias string
-	Alias     string
-	From      string
-	To        string
-	LinkFrom  string
-	LinkTo    string
+	LinkField   string
+	LinkType    string
+	Field       string
+	Type        string
+	Table       string
+	LinkTable   string
+	LinkAlias   string
+	Alias       string
+	From        string
+	To          string
+	LinkFrom    string
+	LinkTo      string
+	IsAttribute bool
+	ManyToOne   []*relation
 }
 
 var structLookup map[string]*structToken
@@ -174,6 +176,8 @@ func main() {
 
 	newStructToks := make([]*structToken, 0)
 
+	//ugly shit
+	//TODO refactor to recursive parser
 	for _, structTk := range structToks {
 		newStructTk := &structToken{
 			Name:       structTk.Name,
@@ -187,6 +191,7 @@ func main() {
 			ManyToMany: make([]*relation, 0),
 		}
 		for _, sf := range structTk.Fields {
+			l2Rel := make([]*relation, 0)
 			isSlice, embeddedStruct := isRelation(sf)
 			if embeddedStruct == "" {
 				newStructTk.Fields = append(newStructTk.Fields, sf)
@@ -194,31 +199,67 @@ func main() {
 			}
 			newStructTk.Composite = true
 			emb := structLookup[embeddedStruct]
-			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: sf.RelAlias, Type: embeddedStruct}
-			var embeddedIdColumn string
+			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: sf.RelAlias, Type: embeddedStruct, IsAttribute: false}
+			if embeddedStruct == "Attribute" {
+				rel.IsAttribute = true
+			}
+			var embeddedIdColumn string = ""
+			var embeddedIdColumn2 string = ""
 			for _, field := range emb.Fields {
-				//only 1 layer
-				_, embedded := isRelation(field)
-				if embedded != "" {
+				// 1 st layer only manytoone
+				isSlice2, embedded := isRelation(field)
+				if isSlice2 {
 					continue
 				}
 				if field.Name == "ID" {
 					embeddedIdColumn = field.Column
 				}
-				name := sf.Name + "." + field.Name
+				baseName := sf.Name
 				if isSlice {
-					name = "proxy" + name
+					baseName = "proxy" + baseName
 				}
-				nf := &fieldToken{
-					Name:   name,
-					Type:   field.Type,
-					Slice:  isSlice,
-					Column: field.Column,
-					Table:  field.Table,
-					Alias:  field.Alias,
-					Fk:     sf.Fk,
+				if embedded == "" {
+					name := baseName + "." + field.Name
+					nf := &fieldToken{
+						Name:   name,
+						Type:   field.Type,
+						Slice:  isSlice,
+						Column: field.Column,
+						Table:  field.Table,
+						Alias:  field.Alias,
+						Fk:     sf.Fk,
+					}
+					newStructTk.Fields = append(newStructTk.Fields, nf)
+					continue
 				}
-				newStructTk.Fields = append(newStructTk.Fields, nf)
+				emb2 := structLookup[embedded]
+				if emb2 == emb {
+					continue
+				}
+				rel2 := &relation{Field: field.Name, Table: emb2.Table, Alias: field.RelAlias, Type: embedded}
+				for _, field2 := range emb2.Fields {
+					_, embedded2 := isRelation(field2)
+					if embedded2 != "" {
+						continue
+					}
+					if field2.Name == "ID" {
+						embeddedIdColumn2 = field2.Column
+					}
+					name2 := baseName + "." + field.Name + "." + field2.Name
+					nf2 := &fieldToken{
+						Name:   name2,
+						Type:   field2.Type,
+						Slice:  isSlice,
+						Column: field2.Column,
+						Table:  field2.Table,
+						Alias:  field2.Alias,
+						Fk:     field.Fk,
+					}
+					newStructTk.Fields = append(newStructTk.Fields, nf2)
+				}
+				rel2.From = field.Fk
+				rel2.To = embeddedIdColumn2
+				l2Rel = append(l2Rel, rel2)
 			}
 			if isSlice {
 				//manytomaany
@@ -249,23 +290,68 @@ func main() {
 							rel.Alias = field.LinkAlias
 						}
 					}
+					if len(l2Rel) > 0 {
+						for _, r2 := range l2Rel {
+							r2.From = rel.LinkTo
+							rel.ManyToOne = append(rel.ManyToOne, r2)
+						}
+					}
 					newStructTk.ManyToMany = addRelation(newStructTk.ManyToMany, rel)
 				} else { //onetomany
 					rel.From = newStructTk.IdColumn
 					rel.To = sf.Fk
+					if len(l2Rel) > 0 {
+						for _, r2 := range l2Rel {
+							//r2.From = sf.Column //sf.Fk
+							rel.ManyToOne = append(rel.ManyToOne, r2)
+						}
+					}
 					newStructTk.OneToMany = addRelation(newStructTk.OneToMany, rel)
 				}
 			} else {
 				rel.From = sf.Fk
 				rel.To = embeddedIdColumn
+				if len(l2Rel) > 0 {
+					rel.ManyToOne = append(rel.ManyToOne, l2Rel...)
+				}
 				newStructTk.ManyToOne = addRelation(newStructTk.ManyToOne, rel)
 			}
 		}
+		checkDuplicateAlias(newStructTk)
 		newStructToks = append(newStructToks, newStructTk)
 	}
 
 	if err := genFile(*outFilename, *packName, *unexport, newStructToks); err != nil {
 		log.Fatal("couldn't generate file:", err)
+	}
+}
+
+var aliases map[string]int
+
+func checkDuplicateAlias(s *structToken) {
+	aliases = make(map[string]int, 10)
+	checkAlias(s.ManyToOne)
+	checkAlias(s.ManyToMany)
+	checkAlias(s.OneToMany)
+	for _, morel := range s.ManyToOne {
+		checkAlias(morel.ManyToOne)
+	}
+	for _, mmrel := range s.ManyToMany {
+		checkAlias(mmrel.ManyToOne)
+	}
+	for _, omrel := range s.OneToMany {
+		checkAlias(omrel.ManyToOne)
+	}
+}
+
+func checkAlias(rels []*relation) {
+	for _, rel := range rels {
+		if _, ok := aliases[rel.Alias]; ok {
+			//already exists
+			rel.Alias = "dd" + rel.Alias
+			continue
+		}
+		aliases[rel.Alias] = 1
 	}
 }
 
@@ -465,14 +551,7 @@ func parseCode(source string, commaList string) ([]*structToken, error) {
 			}
 
 			structToks = append(structToks, structTok)
-			structLookup[structTok.Name] = structTok /*structToken{
-				Name:      structTok.Name,
-				Fields:    structTok.Fields,
-				Composite: structTok.Composite,
-				Table:     structTok.Table,
-				Alias:     structTok.Alias,
-			}*/
-
+			structLookup[structTok.Name] = structTok
 		}
 	}
 
@@ -598,6 +677,11 @@ func FieldOnly(prop string) string {
 	return propSeq[len(propSeq)-1]
 }
 
+func FieldShift(prop string) string {
+	propSeq := strings.Split(prop, ".")
+	return strings.Join(propSeq[1:], ".")
+}
+
 func ProxyType(prop string) string {
 	propSeq := strings.Split(prop, ".")
 	return strings.TrimPrefix(propSeq[0], "proxy")
@@ -640,6 +724,15 @@ func FilterFields(fields []*fieldToken, entityType string) []*fieldToken {
 	return fts
 }
 
+func AndObjectType(rels []*relation) *relation {
+	for _, rel := range rels {
+		if rel.Type == "ObjectType" {
+			return rel
+		}
+	}
+	return nil
+}
+
 //lookup first part field Name (check '.') in relations referencing Field =>switch global alias for relation alias
 func UpdateAlias(tok *structToken, field, alias string) string {
 	if !strings.Contains(field, ".") {
@@ -647,22 +740,33 @@ func UpdateAlias(tok *structToken, field, alias string) string {
 	}
 	prts := strings.Split(field, ".")
 	lookup := strings.TrimPrefix(prts[0], "proxy")
-	for _, om := range tok.OneToMany {
-		if lookup == om.Field {
-			return om.Alias
-		}
+	var result string
+	if result = lookUpAlias(tok.OneToMany, lookup, prts); result != "" {
+		return result
 	}
-	for _, mo := range tok.ManyToOne {
-		if lookup == mo.Field {
-			return mo.Alias
-		}
+	if result = lookUpAlias(tok.ManyToOne, lookup, prts); result != "" {
+		return result
 	}
-	for _, mm := range tok.ManyToMany {
-		if lookup == mm.Field {
-			return mm.Alias
-		}
+	if result = lookUpAlias(tok.ManyToMany, lookup, prts); result != "" {
+		return result
 	}
 	return alias
+}
+
+func lookUpAlias(rels []*relation, lookup string, prts []string) string {
+	for _, rel := range rels {
+		if len(rel.ManyToOne) > 0 && len(prts) > 2 {
+			for _, rel2 := range rel.ManyToOne {
+				if prts[1] == rel2.Field {
+					return rel2.Alias
+				}
+			}
+		}
+		if lookup == rel.Field {
+			return rel.Alias
+		}
+	}
+	return ""
 }
 
 func FilterSliceAndID(fields []*fieldToken) []*fieldToken {
@@ -744,15 +848,23 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 			}
 			return false
 		},
+		"istime": func(tpe string) bool {
+			if tpe == "time.Time" {
+				return true
+			}
+			return false
+		},
 		"switch2fk":         SwitchToFK,
 		"ffiltersliceandid": FilterSliceAndID,
 		"updatealias":       UpdateAlias,
 		"ffilternatid":      FilterNonNativeFieldsAndIDs,
 		"ffilterid":         FilterFieldsAndIDs,
 		"field":             FieldOnly,
+		"fieldshift":        FieldShift,
 		"proxy":             ProxyType,
 		"ffilter":           FilterFields,
 		"native":            NativeField,
+		"objecttype":        AndObjectType,
 		"plus1": func(x int) int {
 			return x + 1
 		},
