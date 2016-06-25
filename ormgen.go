@@ -285,14 +285,16 @@ func main() {
 						}
 						lname := "proxy" + sf.Link + "." + field.Name
 						if linkEmbedded == "" {
-							nf := &fieldToken{
-								Name:   lname,
-								Type:   field.Type,
-								Column: field.Column,
-								Table:  field.Table,
-								Alias:  sf.LinkAlias,
+							if !strings.Contains(field.Name, "ID") {
+								nf := &fieldToken{
+									Name:   lname,
+									Type:   field.Type,
+									Column: field.Column,
+									Table:  field.Table,
+									Alias:  sf.LinkAlias,
+								}
+								newStructTk.Fields = append(newStructTk.Fields, nf)
 							}
-							newStructTk.Fields = append(newStructTk.Fields, nf)
 						} else {
 							rel.LinkRelationFields = append(rel.LinkRelationFields, &fieldToken{Name: field.Name, Type: linkEmbedded})
 							lemb := structLookup[linkEmbedded]
