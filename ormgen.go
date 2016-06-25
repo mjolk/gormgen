@@ -21,7 +21,7 @@ const (
     Generate Go code to convert database rows into arbitrary structs.
 
 USAGE
-    scaneo [options] paths...
+    ormgen [options] paths...
 
 OPTIONS
     -o, -output
@@ -99,20 +99,21 @@ type structToken struct {
 }
 
 type relation struct {
-	LinkField   string
-	LinkType    string
-	Field       string
-	Type        string
-	Table       string
-	LinkTable   string
-	LinkAlias   string
-	Alias       string
-	From        string
-	To          string
-	LinkFrom    string
-	LinkTo      string
-	IsAttribute bool
-	ManyToOne   []*relation
+	LinkRelationFields []*fieldToken
+	LinkField          string
+	LinkType           string
+	Field              string
+	Type               string
+	Table              string
+	LinkTable          string
+	LinkAlias          string
+	Alias              string
+	From               string
+	To                 string
+	LinkFrom           string
+	LinkTo             string
+	IsAttribute        bool
+	ManyToOne          []*relation
 }
 
 var structLookup map[string]*structToken
@@ -200,6 +201,8 @@ func main() {
 			newStructTk.Composite = true
 			emb := structLookup[embeddedStruct]
 			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: sf.RelAlias, Type: embeddedStruct, IsAttribute: false}
+			var rel3 *relation
+			var rel2 *relation
 			if embeddedStruct == "Attribute" {
 				rel.IsAttribute = true
 			}
@@ -236,7 +239,7 @@ func main() {
 				if emb2 == emb {
 					continue
 				}
-				rel2 := &relation{Field: field.Name, Table: emb2.Table, Alias: field.RelAlias, Type: embedded}
+				rel2 = &relation{Field: field.Name, Table: emb2.Table, Alias: field.RelAlias, Type: embedded}
 				for _, field2 := range emb2.Fields {
 					_, embedded2 := isRelation(field2)
 					if embedded2 != "" {
@@ -272,16 +275,48 @@ func main() {
 					linkStruct := structLookup[sf.Link]
 					rel.LinkTable = linkStruct.Table
 					for _, field := range linkStruct.Fields {
-						//toDO add linkfields???
-						name := "proxy" + sf.Link + "." + field.Name
-						nf := &fieldToken{
-							Name:   name,
-							Type:   field.Type,
-							Column: field.Column,
-							Table:  field.Table,
-							Alias:  sf.LinkAlias,
+						//adding relations to link table
+						slc, linkEmbedded := isRelation(field)
+						if slc {
+							continue
 						}
-						newStructTk.Fields = append(newStructTk.Fields, nf)
+						if field.Name == "ID" {
+							continue
+						}
+						lname := "proxy" + sf.Link + "." + field.Name
+						if linkEmbedded == "" {
+							nf := &fieldToken{
+								Name:   lname,
+								Type:   field.Type,
+								Column: field.Column,
+								Table:  field.Table,
+								Alias:  sf.LinkAlias,
+							}
+							newStructTk.Fields = append(newStructTk.Fields, nf)
+						} else {
+							rel.LinkRelationFields = append(rel.LinkRelationFields, &fieldToken{Name: field.Name, Type: linkEmbedded})
+							lemb := structLookup[linkEmbedded]
+							rel3 = &relation{Field: field.Name, Table: lemb.Table, Alias: field.RelAlias, Type: linkEmbedded}
+							for _, lfld := range lemb.Fields {
+								if _, linkRelEmb := isRelation(lfld); linkRelEmb != "" {
+									continue
+								}
+								if lfld.Name == "ID" {
+									rel3.To = lfld.Column
+								}
+								name := lname + "." + lfld.Name
+								nfl := &fieldToken{
+									Name:   name,
+									Type:   lfld.Type,
+									Column: lfld.Column,
+									Table:  lfld.Table,
+									Alias:  lfld.Alias,
+								}
+								newStructTk.Fields = append(newStructTk.Fields, nfl)
+							}
+							rel3.From = field.Column
+							rel.ManyToOne = append(rel.ManyToOne, rel3)
+						}
 						if field.Link == newStructTk.Name {
 							rel.To = field.Column
 						}
@@ -798,6 +833,22 @@ func SwitchToFK(field *fieldToken) string {
 	return field.Column
 }
 
+func OnlyIDFields(fields []*fieldToken) []*fieldToken {
+	rets := make([]*fieldToken, 0)
+	for _, fld := range fields {
+		nm := FieldShift(fld.Name)
+		if strings.Contains(nm, ".") {
+			if FieldOnly(nm) == "ID" {
+				rets = append(rets, fld)
+			}
+		} else if !strings.Contains(nm, "ID") {
+			rets = append(rets, fld)
+		}
+
+	}
+	return rets
+}
+
 func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 	if len(toks) < 1 {
 		return errors.New("no structs found")
@@ -865,6 +916,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 		"ffilter":           FilterFields,
 		"native":            NativeField,
 		"attributealias":    AttributeAlias,
+		"ffilterforids":     OnlyIDFields,
 		"plus1": func(x int) int {
 			return x + 1
 		},

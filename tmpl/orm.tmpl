@@ -20,7 +20,7 @@ func Query{{title .Name}}s(query string, params []interface{}) ([]*{{.Name}}, er
 }
 
 func {{.Name}}From() string { {{$basetpe := .Name}}{{$attralias := attributealias .OneToMany}}
-	return `FROM {{.Table}} {{.Alias}}{{$mt:=.Alias}}{{range .OneToMany}} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN objecttype o ON a.obj_id = o.obj_id WHERE o.name = '{{$basetpe}}') AS {{$attralias}}{{else}}{{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{$mtttt := .Alias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToOne}}{{$mtt := .Alias}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{$mt}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{$mttt := .Alias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
+	return `FROM {{.Table}} {{.Alias}}{{$mt:=.Alias}}{{range .OneToMany}} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN objecttype o ON a.obj_id = o.obj_id WHERE o.name = '{{$basetpe}}') AS {{$attralias}}{{else}}{{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{$mtttt := .Alias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToOne}}{{$mtt := .Alias}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mt}}.{{.From}} = {{.Alias}}.{{.To}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mtt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{range .ManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{$mt}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{$mttt := .LinkAlias}}{{range .ManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{$mttt}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
 }
 
 func {{.Name}}Select() string { {{$tok := .}}
@@ -32,43 +32,44 @@ func Find{{title .Name}}ByID(id int) (*{{.Name}}, error) {
 	return Query{{title .Name}}(query, []interface{}{id})
 }
 {{ if .Composite}}
-func Insert{{title .Name}}(entity *{{.Name}}) (err error) {
-	return Transact(func (tx *sql.Tx) error {  {{$natfields := ffiltersliceandid .Fields}}
-		_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .OneToMany}}{{$tpe:=.Field}}{{$aliasOm:=.Alias}}
-		if len(entity.{{.Field}}) > 0 {
-			for _, rel := range entity.{{.Field}} {
-				err = Insert{{.Type}}(rel)
-			}
-		}{{end}}{{range .ManyToMany}}
-		if len(entity.{{.Field}}) > 0 {
-			for _, rel := range entity.{{.Field}} {
-				_, err = Dbase().Exec(`INSERT INTO {{.LinkTable}} ({{.To}}, {{.LinkFrom}}) VALUES($1, $2)`, entity.ID, rel.ID)
-				err = Insert{{.Type}}(rel)
-			}
-		}{{end}}
-		return err
-        })
+func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}
+	{{$natfields := ffiltersliceandid .Fields}}
+	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .OneToMany}}{{$tpe:=.Field}}{{$aliasOm:=.Alias}}
+	if len(entity.{{.Field}}) > 0 {
+		for _, rel := range entity.{{.Field}} {
+			err = Insert{{.Type}}(rel)
+		}
+	}{{end}}{{range .ManyToMany}}
+	if len(entity.{{.Field}}) > 0 {
+		for _, rel := range entity.{{.Field}} { {{$linkfields := ffilter $sfields .LinkField | ffilterforids}} {{$linktpe := .LinkType}} {{$tolinktpe := .Type}}
+			linkEntity := &{{.LinkType}}{ {{range $ol, $pl := .LinkRelationFields}}{{if $ol}}, {{end}}{{$pl.Name}}:&{{$pl.Type}}{}{{end}} }
+			linkEntity.{{$owner}}ID = entity.ID
+			linkEntity.{{$tolinktpe}}ID = rel.ID {{range $linkidx, $linkf := $linkfields}}
+			linkEntity.{{fieldshift .Name}} = rel.{{fieldshift .Name}}{{end}}
+			err = Insert{{$linktpe}}(linkEntity)
+		}
+	}{{end}}
+	return err
 }
 
 func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == 0 {
 		return errors.New("Cannot update without entity identifier")
 	}
-	return Transact(func (*sql.Tx) error { {{$l := len $natfields}}
-		queryPrts := make([]string, 0)
-		updateFields := make([]interface{}, 0)
-		{{range $fi, $fld := $natfields}}{{$isbool := isbool .Type}}{{if not $isbool}}{{if istime .Type}}if entity.{{.Name}}.IsZero(){{else}}if entity.{{.Name}} != {{if isint .Type}}0{{else if isstring .Type}}""{{else}}nil{{end}}{{end}} {
-			queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`)
-			updateFields = append(updateFields, entity.{{.Name}})
-		}{{else}}
-		queryPrts = append(queryPrts, `SET {{.Column}} = ${{plus1 $fi}}`)
-		updateFields = append(updateFields, entity.{{.Name}}){{end}}
-		{{end}}
-		queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IdColumn}} = ${{plus1 $l}}`
-		updateFields = append(updateFields, entity.ID)
-		_, err := Dbase().Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
-		return err
-	})
+	{{$l := len $natfields}}
+	queryPrts := make([]string, 0)
+	updateFields := make([]interface{}, 0)
+	{{range $fi, $fld := $natfields}}{{$isbool := isbool .Type}}{{if not $isbool}}{{if istime .Type}}if entity.{{.Name}}.IsZero(){{else}}if entity.{{.Name}} != {{if isint .Type}}0{{else if isstring .Type}}""{{else}}nil{{end}}{{end}} {
+		queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`)
+		updateFields = append(updateFields, entity.{{.Name}})
+	}{{else}}
+	queryPrts = append(queryPrts, `SET {{.Column}} = ${{plus1 $fi}}`)
+	updateFields = append(updateFields, entity.{{.Name}}){{end}}
+	{{end}}
+	queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IdColumn}} = ${{plus1 $l}}`
+	updateFields = append(updateFields, entity.ID)
+	_, err = Dbase().Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
+	return err
 }
 
 func Query{{title .Name}}(query string, params []interface{}) (*{{.Name}}, error) {
@@ -103,7 +104,7 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 	for rs.Next() {
 		s := proxy{{.Name}}{ 
 			{{.Name}}:&{{.Name}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}
-				{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }, proxy{{.LinkField}}:&{{.LinkType}}{}{{end}}{{if gt $mm 0}},{{end}}
+				{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}} },{{$om := len .OneToMany}}{{range $j, $k := .OneToMany}}{{if $j}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }{{end}}{{if gt $om 0}},{{end}}{{$mm := len .ManyToMany}}{{range $l, $m := .ManyToMany}}{{if $l}}, {{end}}proxy{{.Field}}:&{{.Type}}{ {{range $i, $f := .ManyToOne}}{{if $i}}, {{end}}{{.Field}}:&{{.Type}}{}{{end}} }, proxy{{.LinkField}}:&{{.LinkType}}{ {{range $o, $p := .LinkRelationFields}}{{if $o}}, {{end}}{{$p.Name}}:&{{$p.Type}}{}{{end}} }{{end}}{{if gt $mm 0}},{{end}}
 		}
 		if err = rs.Scan({{range .Fields}}
 			&s.{{.Name}},{{end}}
