@@ -65,15 +65,19 @@ NOTES
 
     Integrate this with go generate by adding this line to the top of your
     tables.go file.
-        //go:generate scaneo $GOFILE
+        //go:generate ormgen $GOFILE
 `
-	COLUMN = "column"
-	TABLE  = "table"
-	FK     = "fk"
-	LINK   = "link"
+	COLUMN     = "column"
+	TABLE      = "table"
+	FK         = "fk"
+	LINK       = "link"
+	MANYTOMANY = "manytomany"
+	ONETOMANY  = "onetomany"
+	MANYTOONE  = "manytoone"
 )
 
 type fieldToken struct {
+	Relation  *relation
 	Name      string
 	Type      string
 	Slice     bool
@@ -87,33 +91,85 @@ type fieldToken struct {
 }
 
 type structToken struct {
-	IdColumn   string
-	Name       string
-	Fields     []*fieldToken
-	Composite  bool
-	OneToMany  []*relation
-	ManyToOne  []*relation
-	ManyToMany []*relation
-	Table      string
-	Alias      string
+	IdColumn  string
+	Name      string
+	Fields    []*fieldToken
+	Composite bool
+	Relations []*relation
+	Table     string
+	Alias     string
+}
+
+type context struct {
+	Name      string
+	IsLink    bool
+	IsSlice   bool
+	LinkAlias string
+	Level     int
+	Link      string
+	Alias     string
+	Fk        string
 }
 
 type relation struct {
-	LinkRelationFields []*fieldToken
-	LinkField          string
-	LinkType           string
-	Field              string
-	Type               string
-	Table              string
-	LinkTable          string
-	LinkAlias          string
-	Alias              string
-	From               string
-	To                 string
-	LinkFrom           string
-	LinkTo             string
-	IsAttribute        bool
-	ManyToOne          []*relation
+	RelationType   string
+	FieldName      string
+	Proxy          bool
+	ProxyFieldName string
+	ParentRelation *relation
+	Owner          *structToken
+	Source         string
+	SourceType     string
+	TargetType     string
+	LinkField      string
+	LinkType       string
+	Field          string
+	Type           string
+	Table          string
+	LinkTable      string
+	LinkAlias      string
+	Alias          string
+	From           string
+	To             string
+	LinkFrom       string
+	LinkTo         string
+	IsAttribute    bool
+	IsRoot         bool
+	Fields         []*fieldToken
+}
+
+func (r *relation) Parent() *relation {
+	if r.ParentRelation == nil {
+		return &relation{Alias: r.Owner.Alias, Type: r.Owner.Name, IsRoot: true}
+	}
+	return r.ParentRelation
+}
+
+func (r *relation) ParentName() string {
+	return r.Parent().Type
+}
+
+func (r *relation) ParentAlias() string {
+	return r.Parent().Alias
+}
+
+func (r *relation) IsManyToMany() bool {
+	return r.RelationType == MANYTOMANY
+}
+
+func (r *relation) IsOneToMany() bool {
+	return r.RelationType == ONETOMANY
+}
+
+func (r *relation) IsManyToOne() bool {
+	return r.RelationType == MANYTOONE
+}
+
+func (r *relation) Equals(rel *relation) bool {
+	if r.RelationType == rel.RelationType && r.Type == rel.Type && r.Field == rel.Field && r.Table == rel.Table && rel.FieldName == r.FieldName {
+		return true
+	}
+	return false
 }
 
 var structLookup map[string]*structToken
@@ -121,13 +177,13 @@ var structLookup map[string]*structToken
 func main() {
 	log.SetFlags(0)
 
-	outFilename := flag.String("o", "ormgen.go", "")
+	outFilename := flag.String("o", "ormgen2.go", "")
 	packName := flag.String("p", "current directory", "")
 	unexport := flag.Bool("u", false, "")
 	whitelist := flag.String("w", "", "")
 	version := flag.Bool("v", false, "")
 	help := flag.Bool("h", false, "")
-	flag.StringVar(outFilename, "output", "ormgen.go", "")
+	flag.StringVar(outFilename, "output", "ormgen2.go", "")
 	flag.StringVar(packName, "package", "current directory", "")
 	flag.BoolVar(unexport, "unexport", false, "")
 	flag.StringVar(whitelist, "whitelist", "", "")
@@ -144,7 +200,7 @@ func main() {
 	}
 
 	if *version {
-		fmt.Println("scaneo version 1.2.0")
+		fmt.Println("ormgen version 0.0.1")
 		return
 	}
 
@@ -177,184 +233,23 @@ func main() {
 
 	newStructToks := make([]*structToken, 0)
 
-	//ugly shit
-	//TODO refactor to recursive parser
 	for _, structTk := range structToks {
 		newStructTk := &structToken{
-			Name:       structTk.Name,
-			Fields:     make([]*fieldToken, 0),
-			Composite:  false,
-			Table:      structTk.Table,
-			Alias:      structTk.Alias,
-			IdColumn:   structTk.IdColumn,
-			OneToMany:  make([]*relation, 0),
-			ManyToOne:  make([]*relation, 0),
-			ManyToMany: make([]*relation, 0),
+			Name:      structTk.Name,
+			Fields:    make([]*fieldToken, 0),
+			Composite: false,
+			Table:     structTk.Table,
+			Alias:     structTk.Alias,
+			IdColumn:  structTk.IdColumn,
 		}
-		for _, sf := range structTk.Fields {
-			l2Rel := make([]*relation, 0)
-			isSlice, embeddedStruct := isRelation(sf)
-			if embeddedStruct == "" {
-				newStructTk.Fields = append(newStructTk.Fields, sf)
-				continue
-			}
-			newStructTk.Composite = true
-			emb := structLookup[embeddedStruct]
-			rel := &relation{Field: sf.Name, Table: emb.Table, Alias: sf.RelAlias, Type: embeddedStruct, IsAttribute: false}
-			var rel3 *relation
-			var rel2 *relation
-			if embeddedStruct == "Attribute" {
-				rel.IsAttribute = true
-			}
-			var embeddedIdColumn string = ""
-			var embeddedIdColumn2 string = ""
-			for _, field := range emb.Fields {
-				// 1 st layer only manytoone
-				isSlice2, embedded := isRelation(field)
-				if isSlice2 {
-					continue
-				}
-				if field.Name == "ID" {
-					embeddedIdColumn = field.Column
-				}
-				baseName := sf.Name
-				if isSlice {
-					baseName = "proxy" + baseName
-				}
-				if embedded == "" {
-					name := baseName + "." + field.Name
-					nf := &fieldToken{
-						Name:   name,
-						Type:   field.Type,
-						Slice:  isSlice,
-						Column: field.Column,
-						Table:  field.Table,
-						Alias:  field.Alias,
-						Fk:     sf.Fk,
-					}
-					newStructTk.Fields = append(newStructTk.Fields, nf)
-					continue
-				}
-				emb2 := structLookup[embedded]
-				if emb2 == emb {
-					continue
-				}
-				rel2 = &relation{Field: field.Name, Table: emb2.Table, Alias: field.RelAlias, Type: embedded}
-				for _, field2 := range emb2.Fields {
-					_, embedded2 := isRelation(field2)
-					if embedded2 != "" {
-						continue
-					}
-					if field2.Name == "ID" {
-						embeddedIdColumn2 = field2.Column
-					}
-					name2 := baseName + "." + field.Name + "." + field2.Name
-					nf2 := &fieldToken{
-						Name:   name2,
-						Type:   field2.Type,
-						Slice:  isSlice,
-						Column: field2.Column,
-						Table:  field2.Table,
-						Alias:  field2.Alias,
-						Fk:     field.Fk,
-					}
-					newStructTk.Fields = append(newStructTk.Fields, nf2)
-				}
-				rel2.From = field.Fk
-				rel2.To = embeddedIdColumn2
-				l2Rel = append(l2Rel, rel2)
-			}
-			if isSlice {
-				//manytomaany
-				if sf.Link != "" {
-					rel.LinkAlias = sf.LinkAlias
-					rel.From = newStructTk.IdColumn
-					rel.LinkTo = embeddedIdColumn
-					rel.LinkType = sf.Link
-					rel.LinkField = sf.Link
-					linkStruct := structLookup[sf.Link]
-					rel.LinkTable = linkStruct.Table
-					for _, field := range linkStruct.Fields {
-						//adding relations to link table
-						slc, linkEmbedded := isRelation(field)
-						if slc {
-							continue
-						}
-						if field.Name == "ID" {
-							continue
-						}
-						lname := "proxy" + sf.Link + "." + field.Name
-						if linkEmbedded == "" {
-							if !strings.Contains(field.Name, "ID") {
-								nf := &fieldToken{
-									Name:   lname,
-									Type:   field.Type,
-									Column: field.Column,
-									Table:  field.Table,
-									Alias:  sf.LinkAlias,
-								}
-								newStructTk.Fields = append(newStructTk.Fields, nf)
-							}
-						} else {
-							rel.LinkRelationFields = append(rel.LinkRelationFields, &fieldToken{Name: field.Name, Type: linkEmbedded})
-							lemb := structLookup[linkEmbedded]
-							rel3 = &relation{Field: field.Name, Table: lemb.Table, Alias: field.RelAlias, Type: linkEmbedded}
-							for _, lfld := range lemb.Fields {
-								if _, linkRelEmb := isRelation(lfld); linkRelEmb != "" {
-									continue
-								}
-								if lfld.Name == "ID" {
-									rel3.To = lfld.Column
-								}
-								name := lname + "." + lfld.Name
-								nfl := &fieldToken{
-									Name:   name,
-									Type:   lfld.Type,
-									Column: lfld.Column,
-									Table:  lfld.Table,
-									Alias:  lfld.Alias,
-								}
-								newStructTk.Fields = append(newStructTk.Fields, nfl)
-							}
-							rel3.From = field.Column
-							rel.ManyToOne = append(rel.ManyToOne, rel3)
-						}
-						if field.Link == newStructTk.Name {
-							rel.To = field.Column
-						}
-						if field.Link == emb.Name {
-							rel.LinkFrom = field.Column
-							rel.Alias = field.LinkAlias
-						}
-					}
-					if len(l2Rel) > 0 {
-						for _, r2 := range l2Rel {
-							r2.From = rel.LinkTo
-							rel.ManyToOne = append(rel.ManyToOne, r2)
-						}
-					}
-					newStructTk.ManyToMany = addRelation(newStructTk.ManyToMany, rel)
-				} else { //onetomany
-					rel.From = newStructTk.IdColumn
-					rel.To = sf.Fk
-					if len(l2Rel) > 0 {
-						for _, r2 := range l2Rel {
-							//r2.From = sf.Column //sf.Fk
-							rel.ManyToOne = append(rel.ManyToOne, r2)
-						}
-					}
-					newStructTk.OneToMany = addRelation(newStructTk.OneToMany, rel)
-				}
-			} else {
-				rel.From = sf.Fk
-				rel.To = embeddedIdColumn
-				if len(l2Rel) > 0 {
-					rel.ManyToOne = append(rel.ManyToOne, l2Rel...)
-				}
-				newStructTk.ManyToOne = addRelation(newStructTk.ManyToOne, rel)
-			}
-		}
+		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
+		//log.Printf("============entity name : %s =================== \n", newStructTk.Name)
+		sep := ""
+		for _, rel := range newStructTk.RootRelations() {
+			printRelationTree(sep, rel, newStructTk.Relations)
+		}
+		proxyfy(newStructTk)
 		newStructToks = append(newStructToks, newStructTk)
 	}
 
@@ -363,33 +258,286 @@ func main() {
 	}
 }
 
+func printRelationTree(sep string, rel *relation, rels []*relation) {
+	//log.Printf("%s %s type:%s\n", sep, rel.RelationType, rel.Type)
+	srels := rel.SubRelations(rels)
+	sep = sep + "----"
+	for _, subrel := range srels {
+		printRelationTree(sep, subrel, rels)
+	}
+}
+
+func (s *structToken) RootRelations() []*relation {
+	res := make([]*relation, 0)
+	for _, rel := range s.Relations {
+		if rel.ParentRelation == nil {
+			res = append(res, rel)
+		}
+	}
+	return res
+}
+
+func (r *relation) Root() *relation {
+	previous := r
+	lr := r
+	log.Printf("root lookup %+v \n", lr.Parent())
+	for lr.Parent() != nil {
+		parent := lr.Parent()
+		if parent.IsRoot {
+			return previous
+		}
+		previous = lr
+		lr = parent
+	}
+	return nil
+}
+
+func (r *relation) SubRelations(rels []*relation) []*relation {
+	res := make([]*relation, 0)
+	for _, rel := range rels {
+		if r.Equals(rel.Parent()) {
+			res = append(res, rel)
+		}
+	}
+	return res
+}
+
+func (r *relation) AllSubRelations(rels []*relation) []*relation {
+	lookup := r.SubRelations(rels)
+	children := make([]*relation, len(lookup))
+	copy(children, lookup)
+	allSubRelations(rels, &children, lookup)
+	return children
+}
+
+func allSubRelations(rels []*relation, children *[]*relation, lookup []*relation) {
+	l2 := make([]*relation, 0)
+	ch := *children
+	for _, child := range lookup {
+		newLookup := child.SubRelations(rels)
+		ch = append(ch, newLookup...)
+		l2 = append(l2, newLookup...)
+
+	}
+	if len(l2) > 0 {
+		*children = ch
+		allSubRelations(rels, children, l2)
+	}
+}
+
+func findRelation(field string, rels []*relation) *relation {
+	for _, rel := range rels {
+		//	log.Printf("fieldName %s\n", rel.FieldName)
+		if rel.FieldName == field {
+			return rel
+		}
+	}
+	return nil
+}
+
+func proxyfyPath(path string, rels []*relation) string {
+	prts := strings.Split(path, ".")
+	edit := make([]string, len(prts))
+	copy(edit, prts)
+	prtsLen := len(prts)
+	for i := prtsLen; i >= 0; i-- {
+		var lookup string
+		if i == 0 {
+			lookup = prts[i]
+		} else {
+			lookup = strings.Join(prts[:i], ".")
+		}
+		fRel := findRelation(lookup, rels)
+		if fRel.IsManyToMany() || fRel.IsOneToMany() {
+			var st int
+			if i == 0 {
+				st = 0
+			} else {
+				st = i - 1
+			}
+			for j := st; j >= 0; j-- {
+				if strings.HasPrefix(edit[j], "proxy") {
+					continue
+				}
+				edit[j] = "proxy" + edit[j]
+			}
+
+		}
+	}
+	return strings.Join(edit, ".")
+
+}
+
+func proxyfy(src *structToken) {
+	for s, rel := range src.Relations {
+		if rel.IsManyToMany() || rel.IsOneToMany() {
+			for _, field := range src.Fields {
+				prts := strings.Split(field.Name, ".")
+				lPrts := len(prts) - 1
+				for i := lPrts; i >= 0; i-- {
+					if prts[i] == rel.Field {
+						for j := i; j >= 0; j-- {
+							if strings.HasPrefix(prts[j], "proxy") {
+								continue
+							}
+							prts[j] = "proxy" + prts[j]
+						}
+					}
+				}
+				field.Name = strings.Join(prts, ".")
+			}
+		}
+		src.Relations[s].ProxyFieldName = proxyfyPath(src.Relations[s].FieldName, src.Relations)
+		proxyPrts := strings.Split(src.Relations[s].ProxyFieldName, ".")
+		if strings.HasPrefix(proxyPrts[len(proxyPrts)-1], "proxy") {
+			src.Relations[s].Proxy = true
+		}
+	}
+}
+
+func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
+	var baseName string
+	if ctx != nil {
+		ctx.Level++
+		if ctx.Level >= 8 && !ctx.IsLink {
+			return
+		}
+		baseName = ctx.Name
+	}
+	for _, field := range src.Fields {
+		isSlice, embeddedStruct := isRelation(field)
+		name := field.Name
+		fk := field.Fk
+		alias := field.Alias
+		lvl := 0
+		if ctx != nil {
+			if ctx.IsLink {
+				alias = ctx.LinkAlias
+				if field.Link != "" && field.Link == pRel.SourceType {
+					pRel.To = field.Column
+				}
+				if field.Link != "" && field.Link == pRel.TargetType {
+					pRel.LinkFrom = field.Column
+					pRel.Alias = field.LinkAlias
+				}
+			}
+			name = baseName + "." + name
+			lvl = ctx.Level
+		}
+		if embeddedStruct == "" {
+			nf := &fieldToken{
+				Relation: pRel,
+				Name:     name,
+				Type:     field.Type,
+				Slice:    isSlice,
+				Column:   field.Column,
+				Table:    field.Table,
+				Alias:    alias,
+				Fk:       fk,
+			}
+			if field.Name == "ID" && ctx != nil {
+				nf.Alias = ctx.Alias
+				nf.Fk = ctx.Fk
+				//log.Printf("<<<---- added field %s fk %s\n", name, ctx.Fk)
+			}
+			res.Fields = append(res.Fields, nf)
+			/*if pRel != nil {
+				pRel.Fields = append(pRel.Fields, nf)
+			}*/
+			continue
+		}
+		//is a relation field
+		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: alias}
+		res.Composite = true
+		emb := structLookup[embeddedStruct]
+		rel := &relation{
+			Field:       field.Name,
+			Table:       emb.Table,
+			Alias:       field.RelAlias,
+			Type:        embeddedStruct,
+			IsAttribute: false,
+			Owner:       res,
+			FieldName:   name,
+		}
+		if pRel != nil {
+			rel.ParentRelation = pRel
+		}
+		if embeddedStruct == "Attribute" {
+			rel.IsAttribute = true
+		}
+		if isSlice {
+			//manytomany
+			nCtx.IsSlice = true
+			if field.Link != "" {
+				//log.Printf("adding [[MANYTOMANY]]: %s \n", field.Name)
+				lnCtx := new(context)
+				lnCtx.Name = nCtx.Name
+				lnCtx.Level = nCtx.Level
+				lnCtx.IsLink = true
+				lnCtx.Link = field.Link
+				linkStruct := structLookup[field.Link]
+				rel.RelationType = MANYTOMANY
+				rel.LinkAlias = field.LinkAlias
+				rel.From = src.IdColumn
+				rel.LinkTo = emb.IdColumn
+				rel.LinkType = field.Link
+				rel.LinkField = field.Link
+				rel.SourceType = src.Name
+				rel.TargetType = emb.Name
+				rel.LinkTable = linkStruct.Table
+				lnCtx.LinkAlias = field.LinkAlias
+				//log.Printf("created m2m relation: %#v\n", rel)
+
+				res.Relations = append(res.Relations, rel)
+				parse(res, linkStruct, rel, lnCtx)
+			} else { //onetomany
+				//log.Printf("adding [[ONETOMANY]]: %s \n", field.Name)
+				//log.Printf("parsing onetomany ctx name : %s", name)
+				rel.From = src.IdColumn
+				rel.To = fk
+				//log.Printf("created o2m relation: %#v\n", rel)
+				rel.RelationType = ONETOMANY
+				res.Relations = append(res.Relations, rel)
+			}
+		} else { // manytoone
+			//log.Printf("adding [[MANYTOONE]]: %s \n", field.Name)
+			rel.From = fk
+			rel.To = emb.IdColumn
+			rel.RelationType = MANYTOONE
+			//log.Printf("created m2o relation: %#v\n", rel)
+			res.Relations = append(res.Relations, rel)
+		}
+		parse(res, emb, rel, nCtx)
+	}
+}
+
 var aliases map[string]int
 
 func checkDuplicateAlias(s *structToken) {
-	aliases = make(map[string]int, 10)
-	checkAlias(s.ManyToOne)
-	checkAlias(s.ManyToMany)
-	checkAlias(s.OneToMany)
-	for _, morel := range s.ManyToOne {
-		checkAlias(morel.ManyToOne)
-	}
-	for _, mmrel := range s.ManyToMany {
-		checkAlias(mmrel.ManyToOne)
-	}
-	for _, omrel := range s.OneToMany {
-		checkAlias(omrel.ManyToOne)
-	}
+	aliases = make(map[string]int, len(s.Relations))
+	checkAlias(s.Relations)
 }
 
 func checkAlias(rels []*relation) {
 	for _, rel := range rels {
-		if _, ok := aliases[rel.Alias]; ok {
-			//already exists
-			rel.Alias = "dd" + rel.Alias
+		if rel.Alias == "" {
+			log.Printf("relation %s of type %s has no alias \n", rel.FieldName, rel.RelationType)
 			continue
 		}
-		aliases[rel.Alias] = 1
+		clearAlias(rel)
 	}
+}
+
+func clearAlias(rel *relation) {
+	if _, ok := aliases[rel.Alias]; ok {
+		//already exists
+		rel.Alias = "x" + rel.Alias
+	} else {
+		aliases[rel.Alias] = 1
+		return
+	}
+	clearAlias(rel)
+	aliases[rel.Alias] = 1
 }
 
 func addRelation(relations []*relation, tpe *relation) []*relation {
@@ -719,6 +867,19 @@ func FieldShift(prop string) string {
 	return strings.Join(propSeq[1:], ".")
 }
 
+func FieldProxyShift(prop string) string {
+	propPrts := strings.Split(prop, ".")
+	propLen := len(propPrts) - 1
+	fieldPath := make([]string, 0)
+	for i := propLen; i >= 0; i-- {
+		if strings.Contains(propPrts[i], "proxy") {
+			continue
+		}
+		fieldPath = append(fieldPath, propPrts[i])
+	}
+	return strings.Join(reverseList(fieldPath), ".")
+}
+
 func ProxyType(prop string) string {
 	propSeq := strings.Split(prop, ".")
 	return strings.TrimPrefix(propSeq[0], "proxy")
@@ -729,6 +890,34 @@ func NativeField(field string) bool {
 		return false
 	}
 	return true
+}
+
+func FieldToVariableName(field string) string {
+	return strings.Replace(field, ".", "_", -1)
+}
+
+func FilterRelations(fields []*fieldToken, prefix string) []*fieldToken {
+	fts := make([]*fieldToken, 0)
+	prefixLen := len(strings.Split(prefix, "."))
+	for _, field := range fields {
+		fldPrts := strings.Split(field.Name, ".")
+		if strings.HasPrefix(field.Name, prefix) && !hasChildLists(prefixLen, fldPrts) {
+			fts = append(fts, field)
+		}
+	}
+	return fts
+}
+
+func hasChildLists(prefixLen int, field []string) bool {
+	lField := len(field)
+	if prefixLen < lField {
+		for i := prefixLen; i < lField; i++ {
+			if strings.Contains(field[i], "proxy") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func FilterNonNativeFieldsAndIDs(fields []*fieldToken) []*fieldToken {
@@ -770,21 +959,30 @@ func AttributeAlias(rels []*relation) string {
 	return ""
 }
 
+func UpdateAlias2(tok *structToken, field, alias string) string {
+	fldPrts := strings.Split(field, ".")
+	fldPrtsLen := len(fldPrts)
+	if fldPrtsLen > 1 {
+		lookup := strings.Join(fldPrts[:fldPrtsLen-1], ".")
+		for _, rel := range tok.Relations {
+			if lookup == rel.ProxyFieldName {
+				return rel.Alias
+			}
+		}
+	}
+	return alias
+}
+
 //lookup first part field Name (check '.') in relations referencing Field =>switch global alias for relation alias
 func UpdateAlias(tok *structToken, field, alias string) string {
+	log.Printf("update alias field %s original alias %s\n", field, alias)
 	if !strings.Contains(field, ".") {
 		return alias
 	}
 	prts := strings.Split(field, ".")
 	lookup := strings.TrimPrefix(prts[0], "proxy")
 	var result string
-	if result = lookUpAlias(tok.OneToMany, lookup, prts); result != "" {
-		return result
-	}
-	if result = lookUpAlias(tok.ManyToOne, lookup, prts); result != "" {
-		return result
-	}
-	if result = lookUpAlias(tok.ManyToMany, lookup, prts); result != "" {
+	if result = lookUpAlias(tok.Relations, lookup, prts); result != "" {
 		return result
 	}
 	return alias
@@ -792,11 +990,9 @@ func UpdateAlias(tok *structToken, field, alias string) string {
 
 func lookUpAlias(rels []*relation, lookup string, prts []string) string {
 	for _, rel := range rels {
-		if len(rel.ManyToOne) > 0 && len(prts) > 2 {
-			for _, rel2 := range rel.ManyToOne {
-				if prts[1] == rel2.Field {
-					return rel2.Alias
-				}
+		if len(prts) > 2 {
+			if prts[1] == rel.Field {
+				return rel.Alias
 			}
 		}
 		if lookup == rel.Field {
@@ -806,6 +1002,7 @@ func lookUpAlias(rels []*relation, lookup string, prts []string) string {
 	return ""
 }
 
+//TODO there are more proxy fields now that are not m2m or 12m
 func FilterSliceAndID(fields []*fieldToken) []*fieldToken {
 	fts := make([]*fieldToken, 0)
 	for _, field := range fields {
@@ -829,6 +1026,7 @@ func SwitchToFK(field *fieldToken) string {
 	prts := strings.Split(field.Name, ".")
 	if len(prts) > 1 {
 		if prts[1] == "ID" {
+			//log.Printf("switchtofk field: %s fk: %s\n", field.Name, field.Fk)
 			return field.Fk
 		}
 	}
@@ -849,6 +1047,61 @@ func OnlyIDFields(fields []*fieldToken) []*fieldToken {
 
 	}
 	return rets
+}
+
+type RelationMerge struct {
+	Token          *structToken
+	Relation       *relation
+	ParentRelation *relation
+	RootRelation   *relation
+}
+
+func RelationLevel(token *structToken, relation, parent, root *relation) RelationMerge {
+	return RelationMerge{
+		Token:          token,
+		Relation:       relation,
+		ParentRelation: parent,
+		RootRelation:   root,
+	}
+}
+
+func reverseList(rels []string) []string {
+	ln := len(rels)
+	nlst := make([]string, ln)
+	k := 0
+	for i := ln - 1; i >= 0; i-- {
+		nlst[k] = rels[i]
+		k++
+	}
+	return nlst
+}
+
+func Fields(rel *relation) string {
+	pth := make([]string, 0)
+	if rel != nil {
+		if rel.IsManyToOne() {
+			pth = append(pth, rel.Field)
+			hrel := rel
+			for !hrel.Parent().IsRoot {
+				if hrel.Parent().IsManyToMany() || hrel.Parent().IsOneToMany() {
+					pth = append(pth, hrel.Parent().Type)
+					return strings.Join(reverseList(pth), ".")
+				}
+				pth = append(pth, hrel.Parent().Field)
+				hrel = hrel.Parent()
+			}
+		}
+	}
+	return ""
+}
+
+func CheckParent(rel *relation) bool {
+	if rel != nil {
+		if !rel.IsManyToOne() {
+			return true
+		}
+	}
+	return false
 }
 
 func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
@@ -877,7 +1130,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 		data.Visibility = "l"
 	}
 
-	tmpl, err := Asset("tmpl/orm.tmpl")
+	tmpl, err := Asset("tmpl/orm2.tmpl")
 	if err != nil {
 		return err
 	}
@@ -907,9 +1160,15 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 			}
 			return false
 		},
+		"proxyshift":        FieldProxyShift,
+		"listfields":        Fields,
+		"checkparent":       CheckParent,
+		"norel":             FilterRelations,
+		"tovar":             FieldToVariableName,
+		"relarg":            RelationLevel,
 		"switch2fk":         SwitchToFK,
 		"ffiltersliceandid": FilterSliceAndID,
-		"updatealias":       UpdateAlias,
+		"updatealias":       UpdateAlias2,
 		"ffilternatid":      FilterNonNativeFieldsAndIDs,
 		"ffilterid":         FilterFieldsAndIDs,
 		"field":             FieldOnly,
