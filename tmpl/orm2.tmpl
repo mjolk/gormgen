@@ -24,7 +24,7 @@ func {{.Name}}From() string { {{$basetpe := .Name}}
 }
 
 func {{.Name}}Select() string { {{$tok := .}}
-	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok .Name .Alias}}.{{.Column}}{{end}}`
+	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
 }
 
 func Find{{title .Name}}ByID(id int) (*{{.Name}}, error) {
@@ -36,7 +36,7 @@ func Find{{title .Name}}ByID(id int) (*{{.Name}}, error) {
 
 func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}
 	{{$natfields := ffiltersliceandid .Fields}}
-	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .Relations}}{{if .IsOneToMany}}
+	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
 	if len(entity.{{.FieldName}}) > 0 {
 		for _, rel := range entity.{{.Field}} {
 			err = Insert{{.Type}}(rel)
@@ -194,7 +194,7 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 				new{{.Relation.Type}} := new({{.Relation.Type}})
 				{{range $a, $b := $omfiltrd}}{{if $a}}
 				{{end}}new{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{if .Relation.IsManyToMany}}{{$lfilterd := ffilter $fields .Relation.LinkField}}{{range $c, $d := $lfilterd}}{{if $c}}
-				{{end}}new{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{end}}{{end}}
+				{{end}}newLINK{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{end}}{{end}}
 				{{range .Relation.SubRelations .Token.Relations}}{{template "merge" relarg $token . $relation $root}}{{end}}
 				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}{{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, new{{.Relation.Type}}){{else}}
 				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, new{{.Relation.Type}}){{end}}

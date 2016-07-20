@@ -77,17 +77,18 @@ NOTES
 )
 
 type fieldToken struct {
-	Relation  *relation
-	Name      string
-	Type      string
-	Slice     bool
-	Column    string
-	Table     string
-	Alias     string
-	Fk        string
-	Link      string
-	LinkAlias string
-	RelAlias  string
+	Relation    *relation
+	Name        string
+	Type        string
+	Slice       bool
+	Column      string
+	Table       string
+	Alias       string
+	Fk          string
+	Link        string
+	LinkAlias   string
+	RelAlias    string
+	IsLinkField bool
 }
 
 type structToken struct {
@@ -136,6 +137,7 @@ type relation struct {
 	IsAttribute    bool
 	IsRoot         bool
 	Fields         []*fieldToken
+	LinkRelation   bool
 }
 
 func (r *relation) Parent() *relation {
@@ -150,6 +152,9 @@ func (r *relation) ParentName() string {
 }
 
 func (r *relation) ParentAlias() string {
+	if r.LinkRelation {
+		return r.Parent().LinkAlias
+	}
 	return r.Parent().Alias
 }
 
@@ -399,7 +404,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 	var baseName string
 	if ctx != nil {
 		ctx.Level++
-		if ctx.Level >= 8 && !ctx.IsLink {
+		if ctx.Level >= 3 && !ctx.IsLink {
 			return
 		}
 		baseName = ctx.Name
@@ -412,7 +417,8 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		lvl := 0
 		if ctx != nil {
 			if ctx.IsLink {
-				alias = ctx.LinkAlias
+				//alias = ctx.LinkAlias
+				log.Printf("link field %s ctx alias: %s linkalias: %s alias: %s relalias: %s\n", baseName+"."+name, alias, field.LinkAlias, alias, field.RelAlias)
 				if field.Link != "" && field.Link == pRel.SourceType {
 					pRel.To = field.Column
 				}
@@ -438,7 +444,9 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			if field.Name == "ID" && ctx != nil {
 				nf.Alias = ctx.Alias
 				nf.Fk = ctx.Fk
-				//log.Printf("<<<---- added field %s fk %s\n", name, ctx.Fk)
+			}
+			if ctx != nil && ctx.IsLink {
+				nf.IsLinkField = true
 			}
 			res.Fields = append(res.Fields, nf)
 			/*if pRel != nil {
@@ -464,6 +472,9 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		}
 		if embeddedStruct == "Attribute" {
 			rel.IsAttribute = true
+		}
+		if ctx != nil && ctx.IsLink {
+			rel.LinkRelation = true
 		}
 		if isSlice {
 			//manytomany
@@ -521,7 +532,7 @@ func checkDuplicateAlias(s *structToken) {
 func checkAlias(rels []*relation) {
 	for _, rel := range rels {
 		if rel.Alias == "" {
-			log.Printf("relation %s of type %s has no alias \n", rel.FieldName, rel.RelationType)
+			//log.Printf("relation %s of type %s has no alias \n", rel.FieldName, rel.RelationType)
 			continue
 		}
 		clearAlias(rel)
@@ -959,13 +970,16 @@ func AttributeAlias(rels []*relation) string {
 	return ""
 }
 
-func UpdateAlias2(tok *structToken, field, alias string) string {
-	fldPrts := strings.Split(field, ".")
+func UpdateAlias2(tok *structToken, field *fieldToken, alias string) string {
+	fldPrts := strings.Split(field.Name, ".")
 	fldPrtsLen := len(fldPrts)
 	if fldPrtsLen > 1 {
 		lookup := strings.Join(fldPrts[:fldPrtsLen-1], ".")
 		for _, rel := range tok.Relations {
 			if lookup == rel.ProxyFieldName {
+				if field.IsLinkField {
+					return rel.LinkAlias
+				}
 				return rel.Alias
 			}
 		}
