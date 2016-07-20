@@ -32,6 +32,16 @@ func Find{{title .Name}}ByID(id int) (*{{.Name}}, error) {
 	return Query{{title .Name}}(query, []interface{}{id})
 }
 
+type proxy{{.Name}} struct {
+	*{{.Name}}{{range .RootRelations}}
+	proxy{{.Field}} *proxy{{.Type}}{{end}}{{range proxysubrels .Name}}
+	proxy{{.Field}} *proxy{{.Type}}{{end}}
+}
+
+func newProxy{{.Name}} () *proxy{{.Name}} {
+	return &proxy{{.Name}}{ {{.Name}}:new({{.Name}})}
+}
+
 {{ if .Composite}}
 
 func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}
@@ -43,13 +53,14 @@ func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Field
 		}
 	}{{end}}{{if .IsManyToMany}}
 	if len(entity.{{.Field}}) > 0 {
-		for _, rel := range entity.{{.Field}} { {{$linkfields := ffilter $sfields .LinkField | ffilterforids}} {{$linktpe := .LinkType}} {{$tolinktpe := .Type}}
-			linkEntity := new({{.LinkType}})
-			{{range $ol, $pl := .SubRelations $relations}}linkEntity.{{.Field}} = new({{.Type}})
-		 {{end}}linkEntity.{{$owner}}ID = entity.ID
-			linkEntity.{{$tolinktpe}}ID = rel.ID {{range $linkidx, $linkf := $linkfields}}
-			linkEntity.{{fieldshift .Name}} = rel.{{fieldshift .Name}}{{end}}
-			err = Insert{{$linktpe}}(linkEntity)
+		for _, rel := range entity.{{.Field}} { {{$natffields := ffilter $sfields .Field}}{{$linktpe := .LinkType}}{{$tolinktpe := .Type}}
+			linkEntity := new({{.LinkType}}){{range .SubRelations $relations}}{{if .LinkRelation}}
+			linkEntity.{{.Field}} = new({{.Type}}){{end}}{{end}}
+		 	linkEntity.{{$owner}}ID = entity.ID
+			linkEntity.{{$tolinktpe}}ID = rel.ID {{range $natffields}}{{if .IsLinkField}}
+			linkEntity.{{fieldshift .Name}} = rel.{{fieldshift .Name}}{{end}}{{end}}{{range .SubRelations $relations}}{{if .LinkRelation}}
+			linkEntity.{{.Type}}.ID = rel.{{.Type}}.ID{{end}}{{end}}
+			err = Insert{{.LinkType}}(linkEntity)
 		}
 	}{{end}}{{end}}
 	return err
@@ -83,16 +94,6 @@ func Query{{title .Name}}(query string, params []interface{}) (*{{.Name}}, error
 	return Load{{title .Name}}(rows)
 }
 
-type proxy{{.Name}} struct {
-	*{{.Name}}{{range .RootRelations}}
-	proxy{{.Field}} *proxy{{.Type}}{{if .IsManyToMany}}
-	proxy{{.LinkField}} *proxy{{.LinkType}}{{end}}{{end}}
-}
-
-func newProxy{{.Name}} () *proxy{{.Name}} {
-	return &proxy{{.Name}}{new ({{.Name}})}
-}
-
 func {{$.Visibility}}oad{{title .Name}}(rs *sql.Rows) (*{{.Name}}, error) {
 	result, err := {{$.Visibility}}oad{{title .Name}}s(rs)
 	if err != nil {
@@ -109,8 +110,7 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 	result := make([]*{{.Name}}, 25)
 	for rs.Next() {
 		s := newProxy{{.Name}}(){{range .Relations}}
-		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{if .IsManyToMany}}
-		s.{{.ProxyFieldName}} = newProxy{{.LinkType}}(){{end}}{{end}}//TODO fix link fieldname
+		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{end}}
 		if err = rs.Scan({{range .Fields}}
 			&s.{{.Name}},{{end}}
 		); err != nil {

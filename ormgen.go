@@ -179,6 +179,8 @@ func (r *relation) Equals(rel *relation) bool {
 
 var structLookup map[string]*structToken
 
+var newStructToks []*structToken
+
 func main() {
 	log.SetFlags(0)
 
@@ -236,7 +238,7 @@ func main() {
 		structToks = append(structToks, toks...)
 	}
 
-	newStructToks := make([]*structToken, 0)
+	newStructToks = make([]*structToken, 0)
 
 	for _, structTk := range structToks {
 		newStructTk := &structToken{
@@ -250,10 +252,10 @@ func main() {
 		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
 		//log.Printf("============entity name : %s =================== \n", newStructTk.Name)
-		sep := ""
-		for _, rel := range newStructTk.RootRelations() {
+		//sep := ""
+		/*for _, rel := range newStructTk.RootRelations() {
 			printRelationTree(sep, rel, newStructTk.Relations)
-		}
+		}*/
 		proxyfy(newStructTk)
 		newStructToks = append(newStructToks, newStructTk)
 	}
@@ -264,7 +266,7 @@ func main() {
 }
 
 func printRelationTree(sep string, rel *relation, rels []*relation) {
-	//log.Printf("%s %s type:%s\n", sep, rel.RelationType, rel.Type)
+	log.Printf("%s %s type:%s\n", sep, rel.RelationType, rel.Type)
 	srels := rel.SubRelations(rels)
 	sep = sep + "----"
 	for _, subrel := range srels {
@@ -332,7 +334,6 @@ func allSubRelations(rels []*relation, children *[]*relation, lookup []*relation
 
 func findRelation(field string, rels []*relation) *relation {
 	for _, rel := range rels {
-		//	log.Printf("fieldName %s\n", rel.FieldName)
 		if rel.FieldName == field {
 			return rel
 		}
@@ -418,7 +419,6 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		if ctx != nil {
 			if ctx.IsLink {
 				//alias = ctx.LinkAlias
-				log.Printf("link field %s ctx alias: %s linkalias: %s alias: %s relalias: %s\n", baseName+"."+name, alias, field.LinkAlias, alias, field.RelAlias)
 				if field.Link != "" && field.Link == pRel.SourceType {
 					pRel.To = field.Column
 				}
@@ -431,6 +431,11 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			lvl = ctx.Level
 		}
 		if embeddedStruct == "" {
+			if ctx != nil && ctx.IsLink {
+				if strings.Contains(field.Name, "ID") {
+					continue
+				}
+			}
 			nf := &fieldToken{
 				Relation: pRel,
 				Name:     name,
@@ -1118,6 +1123,32 @@ func CheckParent(rel *relation) bool {
 	return false
 }
 
+func ProxyLinkRelations(tpe string) []*relation {
+	fts := make([]*relation, 0)
+	for _, tok := range newStructToks {
+		for _, rel := range tok.Relations {
+			if rel.IsManyToMany() {
+				if rel.Type == tpe {
+					for _, crel := range rel.SubRelations(tok.Relations) {
+						if crel.LinkRelation {
+							dup := false
+							for _, lrel := range fts {
+								if lrel.Type == crel.Type {
+									dup = true
+								}
+							}
+							if !dup {
+								fts = append(fts, crel)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return fts
+}
+
 func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 	if len(toks) < 1 {
 		return errors.New("no structs found")
@@ -1174,6 +1205,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 			}
 			return false
 		},
+		"proxysubrels":      ProxyLinkRelations,
 		"proxyshift":        FieldProxyShift,
 		"listfields":        Fields,
 		"checkparent":       CheckParent,
