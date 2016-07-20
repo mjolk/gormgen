@@ -191,7 +191,8 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 				}
 			}
 			if !{{tovar .Relation.FieldName}}Exists { {{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}
-				new{{.Relation.Type}} := new({{.Relation.Type}})
+				new{{.Relation.Type}} := new({{.Relation.Type}}){{$tok := structtok .Relation.Type}}{{range $tok.RootRelations}}{{if .IsManyToOne}}
+				new{{$omntpe}}.{{.FieldName}} = new({{.Type}}){{end}}{{end}}
 				{{range $a, $b := $omfiltrd}}{{if $a}}
 				{{end}}new{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{if .Relation.IsManyToMany}}{{$lfilterd := ffilter $fields .Relation.LinkField}}{{range $c, $d := $lfilterd}}{{if $c}}
 				{{end}}newLINK{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{end}}{{end}}

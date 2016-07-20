@@ -405,7 +405,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 	var baseName string
 	if ctx != nil {
 		ctx.Level++
-		if ctx.Level >= 3 && !ctx.IsLink {
+		if ctx.Level >= 4 && !ctx.IsLink {
 			return
 		}
 		baseName = ctx.Name
@@ -460,7 +460,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			continue
 		}
 		//is a relation field
-		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: alias}
+		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: alias, IsLink: false}
 		res.Composite = true
 		emb := structLookup[embeddedStruct]
 		rel := &relation{
@@ -1123,6 +1123,15 @@ func CheckParent(rel *relation) bool {
 	return false
 }
 
+func FindStructToken(tpe string) *structToken {
+	for _, tok := range newStructToks {
+		if tok.Name == tpe {
+			return tok
+		}
+	}
+	return nil
+}
+
 func ProxyLinkRelations(tpe string) []*relation {
 	fts := make([]*relation, 0)
 	for _, tok := range newStructToks {
@@ -1205,6 +1214,7 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 			}
 			return false
 		},
+		"structtok":         FindStructToken,
 		"proxysubrels":      ProxyLinkRelations,
 		"proxyshift":        FieldProxyShift,
 		"listfields":        Fields,
