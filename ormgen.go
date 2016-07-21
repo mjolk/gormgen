@@ -536,15 +536,15 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			continue
 		}
 		//is a relation field
+		res.Composite = true
 		if ctx != nil {
 			if ctx.Level >= maxLevel /*&& !ctx.IsLink*/ {
 				continue
 			}
-		} /*else if maxLevel == 0 {
+		} else if maxLevel == 0 {
 			continue
-		}*/
+		}
 		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
-		res.Composite = true
 		emb := structLookup[embeddedStruct]
 		rel := &relation{
 			Field:       field.Name,
