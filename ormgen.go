@@ -405,7 +405,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 	var baseName string
 	if ctx != nil {
 		ctx.Level++
-		if ctx.Level >= 4 && !ctx.IsLink {
+		if ctx.Level >= 3 /*&& !ctx.IsLink*/ {
 			return
 		}
 		baseName = ctx.Name
@@ -417,6 +417,9 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		alias := field.Alias
 		lvl := 0
 		if ctx != nil {
+			alias = ctx.Alias
+			name = baseName + "." + name
+			lvl = ctx.Level
 			if ctx.IsLink {
 				//alias = ctx.LinkAlias
 				if field.Link != "" && field.Link == pRel.SourceType {
@@ -427,8 +430,6 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 					pRel.Alias = field.LinkAlias
 				}
 			}
-			name = baseName + "." + name
-			lvl = ctx.Level
 		}
 		if embeddedStruct == "" {
 			if ctx != nil && ctx.IsLink {
@@ -460,7 +461,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			continue
 		}
 		//is a relation field
-		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: alias, IsLink: false}
+		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
 		res.Composite = true
 		emb := structLookup[embeddedStruct]
 		rel := &relation{
@@ -502,16 +503,12 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				rel.TargetType = emb.Name
 				rel.LinkTable = linkStruct.Table
 				lnCtx.LinkAlias = field.LinkAlias
-				//log.Printf("created m2m relation: %#v\n", rel)
-
 				res.Relations = append(res.Relations, rel)
 				parse(res, linkStruct, rel, lnCtx)
 			} else { //onetomany
 				//log.Printf("adding [[ONETOMANY]]: %s \n", field.Name)
-				//log.Printf("parsing onetomany ctx name : %s", name)
 				rel.From = src.IdColumn
 				rel.To = fk
-				//log.Printf("created o2m relation: %#v\n", rel)
 				rel.RelationType = ONETOMANY
 				res.Relations = append(res.Relations, rel)
 			}
@@ -520,7 +517,6 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			rel.From = fk
 			rel.To = emb.IdColumn
 			rel.RelationType = MANYTOONE
-			//log.Printf("created m2o relation: %#v\n", rel)
 			res.Relations = append(res.Relations, rel)
 		}
 		parse(res, emb, rel, nCtx)
