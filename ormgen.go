@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -177,20 +178,79 @@ func (r *relation) Equals(rel *relation) bool {
 	return false
 }
 
-var structLookup map[string]*structToken
-
-var newStructToks []*structToken
+var (
+	maxLevel      int
+	structLookup  map[string]*structToken
+	newStructToks []*structToken
+	baseFileName  string
+	packageName   string
+	unExport      bool
+	fMap          template.FuncMap = template.FuncMap{"title": strings.Title,
+		"isint": func(tpe string) bool {
+			if tpe == "int" {
+				return true
+			}
+			return false
+		},
+		"isbool": func(tpe string) bool {
+			if tpe == "bool" {
+				return true
+			}
+			return false
+		},
+		"isstring": func(tpe string) bool {
+			if tpe == "string" {
+				return true
+			}
+			return false
+		},
+		"istime": func(tpe string) bool {
+			if tpe == "time.Time" {
+				return true
+			}
+			return false
+		},
+		"itoa":              strconv.Itoa,
+		"structtok":         FindStructToken,
+		"proxysubrels":      ProxyLinkRelations,
+		"proxyshift":        FieldProxyShift,
+		"listfields":        Fields,
+		"checkparent":       CheckParent,
+		"norel":             FilterRelations,
+		"tovar":             FieldToVariableName,
+		"relarg":            RelationLevel,
+		"switch2fk":         SwitchToFK,
+		"ffiltersliceandid": FilterSliceAndID,
+		"updatealias":       UpdateAlias2,
+		"ffilternatid":      FilterNonNativeFieldsAndIDs,
+		"ffilterid":         FilterFieldsAndIDs,
+		"field":             FieldOnly,
+		"fieldshift":        FieldShift,
+		"proxy":             ProxyType,
+		"ffilter":           FilterFields,
+		"native":            NativeField,
+		"attributealias":    AttributeAlias,
+		"ffilterforids":     OnlyIDFields,
+		"plus1": func(x int) int {
+			return x + 1
+		},
+		"min1": func(x int) int {
+			return x - 1
+		}}
+)
 
 func main() {
 	log.SetFlags(0)
 
-	outFilename := flag.String("o", "ormgen2.go", "")
+	max := flag.Int("l", 3, "max recursion level")
+	outFilename := flag.String("o", "ormgen", "")
 	packName := flag.String("p", "current directory", "")
 	unexport := flag.Bool("u", false, "")
 	whitelist := flag.String("w", "", "")
 	version := flag.Bool("v", false, "")
 	help := flag.Bool("h", false, "")
-	flag.StringVar(outFilename, "output", "ormgen2.go", "")
+	flag.IntVar(max, "level", 3, "max recursion level")
+	flag.StringVar(outFilename, "output", "ormgen", "")
 	flag.StringVar(packName, "package", "current directory", "")
 	flag.BoolVar(unexport, "unexport", false, "")
 	flag.StringVar(whitelist, "whitelist", "", "")
@@ -198,6 +258,9 @@ func main() {
 	flag.BoolVar(help, "help", false, "")
 	flag.Usage = func() { log.Println(usageText) } // call on flag error
 	flag.Parse()
+
+	baseFileName = *outFilename
+	unExport = *unexport
 
 	if *help {
 		// not an error, send to stdout
@@ -218,6 +281,7 @@ func main() {
 		}
 
 		*packName = filepath.Base(wd)
+		packageName = *packName
 	}
 
 	files, err := findFiles(flag.Args())
@@ -238,9 +302,18 @@ func main() {
 		structToks = append(structToks, toks...)
 	}
 
-	newStructToks = make([]*structToken, 0)
+	generate(*max, structToks, "tmpl/orm.tmpl", "main")
 
-	for _, structTk := range structToks {
+	for i := 0; i <= *max; i++ {
+		generate(i, structToks, "tmpl/ormlevel.tmpl", "level")
+	}
+}
+
+func generate(mLevel int, structs []*structToken, tmpl, tmplName string) {
+	newStructToks = make([]*structToken, 0)
+	maxLevel = mLevel
+
+	for _, structTk := range structs {
 		newStructTk := &structToken{
 			Name:      structTk.Name,
 			Fields:    make([]*fieldToken, 0),
@@ -260,7 +333,13 @@ func main() {
 		newStructToks = append(newStructToks, newStructTk)
 	}
 
-	if err := genFile(*outFilename, *packName, *unexport, newStructToks); err != nil {
+	fileName := fmt.Sprintf("%s_%d.go", baseFileName, mLevel)
+
+	if tmplName == "main" {
+		fileName = fmt.Sprintf("%s_main.go", baseFileName)
+	}
+
+	if err := genFile(fileName, newStructToks, mLevel, tmpl, tmplName); err != nil {
 		log.Fatal("couldn't generate file:", err)
 	}
 }
@@ -287,7 +366,6 @@ func (s *structToken) RootRelations() []*relation {
 func (r *relation) Root() *relation {
 	previous := r
 	lr := r
-	log.Printf("root lookup %+v \n", lr.Parent())
 	for lr.Parent() != nil {
 		parent := lr.Parent()
 		if parent.IsRoot {
@@ -405,9 +483,6 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 	var baseName string
 	if ctx != nil {
 		ctx.Level++
-		if ctx.Level >= 3 /*&& !ctx.IsLink*/ {
-			return
-		}
 		baseName = ctx.Name
 	}
 	for _, field := range src.Fields {
@@ -461,6 +536,13 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			continue
 		}
 		//is a relation field
+		if ctx != nil {
+			if ctx.Level >= maxLevel /*&& !ctx.IsLink*/ {
+				continue
+			}
+		} /*else if maxLevel == 0 {
+			continue
+		}*/
 		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
 		res.Composite = true
 		emb := structLookup[embeddedStruct]
@@ -1017,7 +1099,6 @@ func lookUpAlias(rels []*relation, lookup string, prts []string) string {
 	return ""
 }
 
-//TODO there are more proxy fields now that are not m2m or 12m
 func FilterSliceAndID(fields []*fieldToken) []*fieldToken {
 	fts := make([]*fieldToken, 0)
 	for _, field := range fields {
@@ -1154,7 +1235,7 @@ func ProxyLinkRelations(tpe string) []*relation {
 	return fts
 }
 
-func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
+func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string) error {
 	if len(toks) < 1 {
 		return errors.New("no structs found")
 	}
@@ -1169,74 +1250,27 @@ func genFile(outFile, pkg string, unexport bool, toks []*structToken) error {
 		PackageName string
 		Tokens      []*structToken
 		Visibility  string
+		Level       int
+		Levels      []int
 	}{
-		PackageName: pkg,
+		PackageName: packageName,
 		Visibility:  "L",
 		Tokens:      toks,
+		Level:       lvl,
+		Levels:      make([]int, lvl+1),
 	}
 
-	if unexport {
+	if unExport {
 		// func name will be scanFoo instead of ScanFoo
 		data.Visibility = "l"
 	}
 
-	tmpl, err := Asset("tmpl/orm2.tmpl")
+	mTmpl, err := Asset(tmpl)
 	if err != nil {
 		return err
 	}
 
-	fnMap := template.FuncMap{"title": strings.Title,
-		"isint": func(tpe string) bool {
-			if tpe == "int" {
-				return true
-			}
-			return false
-		},
-		"isbool": func(tpe string) bool {
-			if tpe == "bool" {
-				return true
-			}
-			return false
-		},
-		"isstring": func(tpe string) bool {
-			if tpe == "string" {
-				return true
-			}
-			return false
-		},
-		"istime": func(tpe string) bool {
-			if tpe == "time.Time" {
-				return true
-			}
-			return false
-		},
-		"structtok":         FindStructToken,
-		"proxysubrels":      ProxyLinkRelations,
-		"proxyshift":        FieldProxyShift,
-		"listfields":        Fields,
-		"checkparent":       CheckParent,
-		"norel":             FilterRelations,
-		"tovar":             FieldToVariableName,
-		"relarg":            RelationLevel,
-		"switch2fk":         SwitchToFK,
-		"ffiltersliceandid": FilterSliceAndID,
-		"updatealias":       UpdateAlias2,
-		"ffilternatid":      FilterNonNativeFieldsAndIDs,
-		"ffilterid":         FilterFieldsAndIDs,
-		"field":             FieldOnly,
-		"fieldshift":        FieldShift,
-		"proxy":             ProxyType,
-		"ffilter":           FilterFields,
-		"native":            NativeField,
-		"attributealias":    AttributeAlias,
-		"ffilterforids":     OnlyIDFields,
-		"plus1": func(x int) int {
-			return x + 1
-		},
-		"min1": func(x int) int {
-			return x - 1
-		}}
-	scansTmpl, err := template.New("scans").Funcs(fnMap).Parse(string(tmpl))
+	scansTmpl, err := template.New(tmplName).Funcs(fMap).Parse(string(mTmpl))
 	if err != nil {
 		return err
 	}
