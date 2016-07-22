@@ -9,7 +9,7 @@ import (
 {{$level := .Level}}
 {{$levels := .Levels}}
 
-{{range .Tokens}}
+{{range .Tokens}}{{ if .Composite}}
 
 func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
 	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN objecttype o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if .IsManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
@@ -18,8 +18,6 @@ func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
 func {{.Name}}Select_lvl{{itoa $level}}() string { {{$tok := .}}
 	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
 }
-
-{{ if .Composite}}
 
 func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Name}}, error) {
 	result, err := {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs)

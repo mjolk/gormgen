@@ -23,12 +23,23 @@ func newProxy{{.Name}} () *proxy{{.Name}} {
 	return &proxy{{.Name}}{ {{.Name}}:new({{.Name}})}
 }
 
+func Find{{title .Name}}ByID(id int, lvl int) (*{{.Name}}, error) {
+        query := {{.Name}}Select(lvl) + " " + {{.Name}}From(lvl) + " " + "WHERE {{.Alias}}.{{.IdColumn}} = $1"
+	return Query{{title .Name}}(query, []interface{}{id}, lvl)
+}
+
 {{ if .Composite}}
 
 type {{title .Name}}Loader func(*sql.Rows) ([]*{{.Name}}, error)
 
+type Single{{title .Name}}Loader func(*sql.Rows) (*{{.Name}}, error)
+
 var {{.Name}}Loaders map[int]{{.Name}}Loader = map[int]{{.Name}}Loader{ {{$name := .Name}}{{range $lvl, $irrel := $levels}}
 	{{$lvl}}:{{$.Visibility}}oad{{title $name}}s_lvl{{itoa $lvl}},{{end}}
+}
+
+var Single{{.Name}}Loaders map[int]Single{{.Name}}Loader = map[int]Single{{.Name}}Loader{ {{$name := .Name}}{{range $lvl, $irrel := $levels}}
+	{{$lvl}}:{{$.Visibility}}oad{{title $name}}_lvl{{itoa $lvl}},{{end}}
 }
 
 func Query{{title .Name}}s(query string, params []interface{}, lvl int) ([]*{{.Name}}, error) {
@@ -39,8 +50,31 @@ func Query{{title .Name}}s(query string, params []interface{}, lvl int) ([]*{{.N
 	return {{.Name}}Loaders[lvl](rows)
 }
 
-func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}
-	{{$natfields := ffiltersliceandid .Fields}}
+func Query{{title .Name}}(query string, params []interface{}, lvl int) (*{{.Name}}, error) {
+	rows, err := Dbase().Query(query, params...)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return Single{{.Name}}Loaders[lvl](rows)
+}
+
+var {{.Name}}Selects map[int]func()string = map[int]func()string{ {{$name := .Name}}{{range $lvl, $irrel := $levels}}
+	{{$lvl}}:{{title $name}}Select_lvl{{itoa $lvl}},{{end}}
+}
+
+func {{.Name}}Select(lvl int) string {
+	return {{.Name}}Selects[lvl]()
+}
+
+var {{.Name}}Froms map[int]func()string = map[int]func()string{ {{$name := .Name}}{{range $lvl, $irrel := $levels}}
+	{{$lvl}}:{{title $name}}From_lvl{{itoa $lvl}},{{end}}
+}
+
+func {{.Name}}From(lvl int) string {
+	return {{.Name}}Froms[lvl]()
+}
+
+func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
 	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
 	if len(entity.{{.FieldName}}) > 0 {
 		for _, rel := range entity.{{.Field}} {
@@ -82,6 +116,14 @@ func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffil
 }
 
 {{else}}
+
+func {{.Name}}From(lvl int) string { {{$basetpe := .Name}}
+	return `FROM {{.Table}} {{.Alias}}`
+}
+
+func {{.Name}}Select(lvl int) string { {{$tok := .}}
+	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
+}
 
 func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffilternatid .Fields}}
 	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
