@@ -9,6 +9,7 @@ ormgen [options] paths...
 ```
 -l
     maximum depth to fetch relations, all levels from 0 to max level will be available
+
 -o, -output
     Set the name of the generated file. Default is scans.go.
 
