@@ -115,7 +115,14 @@ func {{.Name}}From(lvl int) string {
 }
 
 func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
-	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}}){{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
+	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
+	if entity.{{referenceonly .Name}} == nil {
+		values = append(values, nil)
+	} else {
+		values = append(values, entity.{{.Name}})
+	}{{else}}
+	values = append(values, entity.{{.Name}}){{end}}{{end}}
+	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, values...){{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
 	if len(entity.{{.FieldName}}) > 0 {
 		for _, rel := range entity.{{.Field}} {
 			err = Insert{{.Type}}(rel)
@@ -132,27 +139,26 @@ func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Field
 			err = Insert{{.LinkType}}(linkEntity)
 		}
 	}{{end}}{{end}}
-	return err
+	return
 }
 
 func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == 0 {
 		return errors.New("Cannot update without entity identifier")
-	}
-	{{$l := len $natfields}}
+	}{{$l := len $natfields}}
 	queryPrts := make([]string, 0)
-	updateFields := make([]interface{}, 0)
-	{{range $fi, $fld := $natfields}}{{$isbool := isbool .Type}}{{if not $isbool}}{{if istime .Type}}if entity.{{.Name}}.IsZero(){{else}}if entity.{{.Name}} != {{if isint .Type}}0{{else if isstring .Type}}""{{else}}nil{{end}}{{end}} {
-		queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`)
+	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if isreference .}}
+	if entity.{{referenceonly .Name}} == nil {
+		updateFields = append(updateFields, nil)
+	} else {
 		updateFields = append(updateFields, entity.{{.Name}})
 	}{{else}}
-	queryPrts = append(queryPrts, `SET {{.Column}} = ${{plus1 $fi}}`)
 	updateFields = append(updateFields, entity.{{.Name}}){{end}}
-	{{end}}
+	queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`){{end}}
 	queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IdColumn}} = ${{plus1 $l}}`
 	updateFields = append(updateFields, entity.ID)
 	_, err = Dbase().Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
-	return err
+	return
 }
 
 {{else}}
@@ -167,7 +173,7 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 
 func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffilternatid .Fields}}
 	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	return err
+	return
 }
 
 func Query{{title .Name}}(query string, params []interface{}, lvl int) (*{{.Name}}, error) {
