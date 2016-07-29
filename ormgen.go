@@ -187,7 +187,7 @@ var (
 	unExport      bool
 	fMap          template.FuncMap = template.FuncMap{"title": strings.Title,
 		"isint": func(tpe string) bool {
-			if tpe == "int" {
+			if tpe == "int64" {
 				return true
 			}
 			return false
@@ -210,6 +210,14 @@ var (
 			}
 			return false
 		},
+		"isbyte": func(tpe string) bool {
+			if tpe == "[]byte" {
+				return true
+			}
+			return false
+		},
+		"linkprops":         LinkPropertiesFor,
+		"linkrels":          LinkRelationsFor,
 		"itoa":              strconv.Itoa,
 		"structtok":         FindStructToken,
 		"proxysubrels":      ProxyLinkRelations,
@@ -228,7 +236,7 @@ var (
 		"fieldshift":        FieldShift,
 		"proxy":             ProxyType,
 		"ffilter":           FilterFields,
-		"native":            NativeField,
+		"native":            OnlyNativeField,
 		"attributealias":    AttributeAlias,
 		"ffilterforids":     OnlyIDFields,
 		"plus1": func(x int) int {
@@ -984,6 +992,59 @@ func NativeField(field string) bool {
 		return false
 	}
 	return true
+}
+
+func OnlyNativeField(fields []*fieldToken) []*fieldToken {
+	fts := make([]*fieldToken, 0)
+	for _, fld := range fields {
+		if NativeField(fld.Name) {
+			fts = append(fts, fld)
+		}
+	}
+	return fts
+}
+
+//special case with fields on linktable many2many, fields are not present on source
+func LinkPropertiesFor(tpe string) []*fieldToken {
+	fieldLookup := "proxy" + tpe + "s"
+	fieldsFound := make(map[string]int, 0)
+	addFields := make([]*fieldToken, 0)
+	for _, tk := range newStructToks {
+		for _, sfts := range tk.Fields {
+			if sfts.IsLinkField {
+				if strings.Contains(sfts.Name, fieldLookup) {
+					fldPrts := strings.Split(sfts.Name, ".")
+					actual := fldPrts[len(fldPrts)-1]
+					if _, ok := fieldsFound[actual]; !ok {
+						fieldsFound[actual] = 1
+						addFields = append(addFields, sfts)
+					}
+				}
+			}
+		}
+	}
+	return addFields
+}
+
+func LinkRelationsFor(tpe string) []*relation {
+	relLookup := tpe + "s"
+	relsFound := make(map[string]int, 0)
+	addRelations := make([]*relation, 0)
+	for _, tk := range newStructToks {
+		for _, relts := range tk.Relations {
+			if relts.LinkRelation {
+				if strings.Contains(relts.FieldName, relLookup) {
+					rlPrts := strings.Split(relts.FieldName, ".")
+					actual := rlPrts[len(rlPrts)-1]
+					if _, ok := relsFound[actual]; !ok {
+						relsFound[actual] = 1
+						addRelations = append(addRelations, relts)
+					}
+				}
+			}
+		}
+	}
+	return addRelations
 }
 
 func FieldToVariableName(field string) string {

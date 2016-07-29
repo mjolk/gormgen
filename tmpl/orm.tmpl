@@ -7,16 +7,56 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 )
+
+func checkSqlInt64Value(val sql.NullInt64) int64 {
+	if !val.Valid {
+		return 0
+	}
+	return val.Int64
+}
+
+func checkSqlStringValue(val sql.NullString) string {
+	if !val.Valid {
+		return ""
+	}
+	return val.String
+}
+
+func checkSqlBoolValue(val sql.NullBool) bool {
+	if !val.Valid {
+		return false
+	}
+	return val.Bool
+}
+
 {{$level := .Level}}
 {{$levels := .Levels}}
 
 {{range .Tokens}}
+{{$native := native .Fields}}{{$linkfields := linkprops .Name}}{{$linkrels := linkrels .Name}}
+type sql{{.Name}} struct { {{range $native}}
+	{{.Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}time.Time{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range .RootRelations}}{{if .IsManyToOne}}
+	{{.Field}} *sql{{.Type}}{{end}}{{end}}{{range $linkfields}}
+	{{field .Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}time.Time{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range $linkrels}}
+	{{.Field}} *sql{{.Type}}{{end}}
+}
+
+type sqlProxy{{.Name}} struct {
+	*sql{{.Name}}{{range .RootRelations}}
+	proxy{{.Field}} *sqlProxy{{.Type}}{{end}}{{range proxysubrels .Name}}
+	proxy{{.Field}} *sqlProxy{{.Type}}{{end}}
+}
 
 type proxy{{.Name}} struct {
 	*{{.Name}}{{range .RootRelations}}
 	proxy{{.Field}} *proxy{{.Type}}{{end}}{{range proxysubrels .Name}}
 	proxy{{.Field}} *proxy{{.Type}}{{end}}
+}
+
+func newSqlProxy{{.Name}} () *sqlProxy{{.Name}} {
+	return &sqlProxy{{.Name}}{ sql{{.Name}}:new(sql{{.Name}})}
 }
 
 func newProxy{{.Name}} () *proxy{{.Name}} {
@@ -144,26 +184,30 @@ func Query{{title .Name}}s(query string, params []interface{}, lvl int) ([]*{{.N
 }
 
 func {{$.Visibility}}oad{{title .Name}}(r *sql.Row) (*{{.Name}}, error) {
-	var s {{.Name}}
+	var s sql{{.Name}}
 	if err := r.Scan({{range .Fields}}
 		&s.{{.Name}},{{end}}
 	); err != nil {
 		return nil, err
 	}
-	return &s, nil
+	var t {{.Name}}{{range .Fields}}
+	t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}s.{{.Name}}{{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
+	return &t, nil
 }
 
 func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 	structs := make([]*{{.Name}}, 0, 16)
 	var err error
 	for rs.Next() {
-		var s {{.Name}}
+		var s sql{{.Name}}
 		if err = rs.Scan({{range .Fields}}
 			&s.{{.Name}},{{end}}
 		); err != nil {
 			return nil, err
 		}
-		structs = append(structs, &s)
+		var t {{.Name}}{{range .Fields}}
+		t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}s.{{.Name}}{{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
+		structs = append(structs, &t)
 	}
 	if err = rs.Err(); err != nil {
 		return nil, err

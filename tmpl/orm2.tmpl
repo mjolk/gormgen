@@ -119,9 +119,11 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {
-			if ent.ID == s.ID {
-				entity = ent
-				newID = false
+			if ent != nil {
+				if ent.ID == s.ID {
+					entity = ent
+					newID = false
+				}
 			}
 		}{{$token := .}}
 		{{range .RootRelations}}

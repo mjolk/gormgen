@@ -32,21 +32,26 @@ func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Na
 
 func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{.Name}}, error) {
 	var err error
-	result := make([]*{{.Name}}, 25)
+	result := make([]*{{.Name}}, 0)
 	for rs.Next() {
-		s := newProxy{{.Name}}(){{range .Relations}}
-		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{end}}
+		t := newSqlProxy{{.Name}}(){{range .Relations}}
+		t.{{.ProxyFieldName}} = {{if .Proxy}}newSqlProxy{{.Type}}(){{else}}new(sql{{.Type}}){{end}}{{end}}
 		if err = rs.Scan({{range .Fields}}
-			&s.{{.Name}},{{end}}
+			&t.{{.Name}},{{end}}
 		); err != nil {
 			return nil, err
 		}
+		s := newProxy{{.Name}}(){{range .Relations}}
+		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{end}}{{range .Fields}}
+		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(t.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(t.{{.Name}}){{ else if istime .Type}}t.{{.Name}}{{else if isbyte .Type}}t.{{.Name}}{{else}}checkSqlStringValue(t.{{.Name}}){{end}}{{end}}
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {
-			if ent.ID == s.ID {
-				entity = ent
-				newID = false
+			if ent != nil {
+				if ent.ID == s.ID {
+					entity = ent
+					newID = false
+				}
 			}
 		}{{$token := .}}
 		{{range .RootRelations}}
