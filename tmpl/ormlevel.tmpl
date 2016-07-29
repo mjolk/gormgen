@@ -43,7 +43,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 		}
 		s := newProxy{{.Name}}(){{range .Relations}}
 		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{end}}{{range .Fields}}
-		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(t.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(t.{{.Name}}){{ else if istime .Type}}t.{{.Name}}{{else if isbyte .Type}}t.{{.Name}}{{else}}checkSqlStringValue(t.{{.Name}}){{end}}{{end}}
+		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(t.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(t.{{.Name}}){{ else if istime .Type}}checkSqlTimeValue(t.{{.Name}}){{else if isbyte .Type}}t.{{.Name}}{{else}}checkSqlStringValue(t.{{.Name}}){{end}}{{end}}
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {

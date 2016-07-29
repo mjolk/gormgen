@@ -4,6 +4,7 @@ package {{.PackageName}}
 
 import (
 	"database/sql"
+	"github.com/lib/pq"
 	"errors"
 	"log"
 	"strings"
@@ -31,15 +32,22 @@ func checkSqlBoolValue(val sql.NullBool) bool {
 	return val.Bool
 }
 
+func checkSqlTimeValue(val pq.NullTime) time.Time {
+	if !val.Valid {
+		return time.Time{}
+	}
+	return val.Time
+}
+
 {{$level := .Level}}
 {{$levels := .Levels}}
 
 {{range .Tokens}}
 {{$native := native .Fields}}{{$linkfields := linkprops .Name}}{{$linkrels := linkrels .Name}}
 type sql{{.Name}} struct { {{range $native}}
-	{{.Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}time.Time{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range .RootRelations}}{{if .IsManyToOne}}
+	{{.Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}pq.NullTime{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range .RootRelations}}{{if .IsManyToOne}}
 	{{.Field}} *sql{{.Type}}{{end}}{{end}}{{range $linkfields}}
-	{{field .Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}time.Time{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range $linkrels}}
+	{{field .Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}pq.NullTime{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range $linkrels}}
 	{{.Field}} *sql{{.Type}}{{end}}
 }
 
@@ -197,7 +205,7 @@ func {{$.Visibility}}oad{{title .Name}}(r *sql.Row) (*{{.Name}}, error) {
 		return nil, err
 	}
 	var t {{.Name}}{{range .Fields}}
-	t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}s.{{.Name}}{{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
+	t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}checkSqlTimeValue(s.{{.Name}}){{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
 	return &t, nil
 }
 
@@ -212,7 +220,7 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 			return nil, err
 		}
 		var t {{.Name}}{{range .Fields}}
-		t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}s.{{.Name}}{{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
+		t.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(s.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(s.{{.Name}}){{else if istime .Type}}checkSqlTimeValue(s.{{.Name}}){{else if isbyte .Type}}s.{{.Name}}{{else}}checkSqlStringValue(s.{{.Name}}){{end}}{{end}}
 		structs = append(structs, &t)
 	}
 	if err = rs.Err(); err != nil {
