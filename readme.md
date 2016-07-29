@@ -1,6 +1,6 @@
 # ORMGEN
 
-## Install
+### Install
 ```
 go generate
 go install
@@ -9,7 +9,7 @@ templates are added to the executable in binary form so you don't get into troub
 with the template file locations
 make sure your $GOPATH/bin is in your PATH
 
-## Usage
+### Usage
 ```
 ormgen [options] paths...
 ```
