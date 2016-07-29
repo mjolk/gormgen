@@ -1,5 +1,14 @@
 # ORMGEN
 
+## Install
+```
+go generate
+go install
+```
+templates are added to the executable in binary form so you don't get into trouble
+with the template file locations
+make sure your $GOPATH/bin is in your PATH
+
 ## Usage
 ```
 ormgen [options] paths...
