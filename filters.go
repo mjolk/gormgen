@@ -64,6 +64,7 @@ var (
 		"ffilterforids":     OnlyIDFields,
 		"isreference":       FieldIsReference,
 		"referenceonly":     ReferenceOnly,
+		"deproxyfy":         DeProxyfyFieldName,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -71,6 +72,10 @@ var (
 			return x - 1
 		}}
 )
+
+func DeProxyfyFieldName(name string) string {
+	return strings.Replace(name, "proxy", "", -1)
+}
 
 func FieldIsReference(ft *fieldToken) bool {
 	if strings.Contains(ft.Name, ".") {

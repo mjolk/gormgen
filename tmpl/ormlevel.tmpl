@@ -9,7 +9,13 @@ import (
 {{$level := .Level}}
 {{$levels := .Levels}}
 
-{{range .Tokens}}{{ if .Composite}}
+{{range .Tokens}}
+{{if $.AtMaxLevel}}{{$ent := .}}
+var {{.Name}}PropToSql = map[string]string{ {{range .Fields}}
+	"{{deproxyfy .Name}}":"{{updatealias $ent . .Alias}}.{{.Column}}",{{end}}
+}{{end}}
+
+{{ if .Composite}}
 
 func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
 	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN objecttype o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if .IsManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`

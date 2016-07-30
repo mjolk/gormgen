@@ -178,6 +178,7 @@ func (r *relation) Equals(rel *relation) bool {
 }
 
 var (
+	inputLevel    int
 	maxLevel      int
 	structLookup  map[string]*structToken
 	newStructToks []*structToken
@@ -208,6 +209,7 @@ func main() {
 
 	baseFileName = *outFilename
 	unExport = *unexport
+	inputLevel = *max
 
 	if *help {
 		// not an error, send to stdout
@@ -249,9 +251,9 @@ func main() {
 		structToks = append(structToks, toks...)
 	}
 
-	generate(*max, structToks, "tmpl/orm.tmpl", "main")
+	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
 
-	for i := 0; i <= *max; i++ {
+	for i := 0; i <= inputLevel; i++ {
 		generate(i, structToks, "tmpl/ormlevel.tmpl", "level")
 	}
 }
@@ -915,12 +917,14 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Visibility  string
 		Level       int
 		Levels      []int
+		AtMaxLevel  bool
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
 		Tokens:      toks,
 		Level:       lvl,
 		Levels:      make([]int, lvl+1),
+		AtMaxLevel:  lvl == inputLevel,
 	}
 
 	if unExport {

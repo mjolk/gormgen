@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"fmt"
 )
 
 func checkSqlInt64Value(val sql.NullInt64) int64 {
@@ -71,9 +72,56 @@ func newProxy{{.Name}} () *proxy{{.Name}} {
 	return &proxy{{.Name}}{ {{.Name}}:new({{.Name}})}
 }
 
+type {{.Name}}Query struct {
+	depth int
+	query string
+	params []interface{}
+}
+
+func New{{.Name}}Query(lvl int) *{{.Name}}Query {
+	return &{{.Name}}Query{
+			query:fmt.Sprintf("%s %s", {{.Name}}Select(lvl), {{.Name}}From(lvl)), 
+			params:make([]interface{}, 0),
+			depth: lvl,
+		}
+}
+
+//TODO add where in
+func (q *{{.Name}}Query) Where(prop string, value interface{}) *{{.Name}}Query {
+	q.params = append(q.params, value)
+	q.query = fmt.Sprintf("%s WHERE %s = $%d", q.query, {{.Name}}PropToSql[prop], len(q.params))
+	return q
+}
+
+//TODO validate previous existence of where
+func (q *{{.Name}}Query) And(prop string, value interface{}) *{{.Name}}Query {
+	q.params = append(q.params, value)
+	q.query = fmt.Sprintf("%s AND %s = $%d", q.query, {{.Name}}PropToSql[prop], len(q.params))
+	return q
+}
+
+func (q *{{.Name}}Query) Or(prop string, value interface{}) *{{.Name}}Query {
+	q.params = append(q.params, value)
+	q.query = fmt.Sprintf("%s OR %s = $%d", q.query, {{.Name}}PropToSql[prop], len(q.params))
+	return q
+}
+
+//TODO allow multiple columns to sort on
+func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
+	q.query = fmt.Sprintf("%s ORDER BY %s %s", q.query, {{.Name}}PropToSql[prop], dir)
+	return q
+}
+
+func (q *{{.Name}}Query) Execute() ([]*{{.Name}}, error) {
+	return Query{{title .Name}}s(q.query, q.params, q.depth)
+}
+
+func (q *{{.Name}}Query) Single() (*{{.Name}}, error) {
+	return Query{{title .Name}}(q.query, q.params, q.depth)
+}
+
 func Find{{title .Name}}ByID(id int, lvl int) (*{{.Name}}, error) {
-        query := {{.Name}}Select(lvl) + " " + {{.Name}}From(lvl) + " " + "WHERE {{.Alias}}.{{.IdColumn}} = $1"
-	return Query{{title .Name}}(query, []interface{}{id}, lvl)
+        return New{{.Name}}Query(lvl).Where("ID", id).Single()
 }
 
 {{ if .Composite}}
