@@ -44,6 +44,17 @@ func checkSqlTimeValue(val pq.NullTime) time.Time {
 {{$levels := .Levels}}
 
 {{range .Tokens}}
+//postgresql specific shit
+func {{.Name}}LastInsertID(tx *sql.Tx) (int64, error) {
+	var nId int64
+
+	//postgresql way of retrieving the last inserted id inside a tx, concurrent safe
+	if err := tx.QueryRow("select currval('{{tolower .Name}}_{{tolower .IdColumn}}_seq')").Scan(&nId); err != nil {
+		return 0, err
+	}
+	return nId, nil
+}
+
 {{$native := native .Fields}}{{$linkfields := linkprops .Name}}{{$linkrels := linkrels .Name}}
 type sql{{.Name}} struct { {{range $native}}
 	{{.Name}} {{ if isint .Type -}}sql.NullInt64{{- else if isbool .Type -}}sql.NullBool{{- else if istime .Type -}}pq.NullTime{{- else if isbyte .Type -}}[]byte{{else}}sql.NullString{{end}}{{end}}{{range .RootRelations}}{{if .IsManyToOne}}
@@ -112,16 +123,16 @@ func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
 	return q
 }
 
-func (q *{{.Name}}Query) Execute() ([]*{{.Name}}, error) {
-	return Query{{title .Name}}s(q.query, q.params, q.depth)
+func (q *{{.Name}}Query) Execute(tx *sql.Tx) ([]*{{.Name}}, error) {
+	return Query{{title .Name}}s(q.query, q.params, q.depth, tx)
 }
 
-func (q *{{.Name}}Query) Single() (*{{.Name}}, error) {
-	return Query{{title .Name}}(q.query, q.params, q.depth)
+func (q *{{.Name}}Query) Single(tx *sql.Tx) (*{{.Name}}, error) {
+	return Query{{title .Name}}(q.query, q.params, q.depth, tx)
 }
 
-func Find{{title .Name}}ByID(id int, lvl int) (*{{.Name}}, error) {
-        return New{{.Name}}Query(lvl).Where("ID", id).Single()
+func Find{{title .Name}}ByID(id int, lvl int, tx *sql.Tx) (*{{.Name}}, error) {
+        return New{{.Name}}Query(lvl).Where("ID", id).Single(tx)
 }
 
 {{ if .Composite}}
@@ -138,18 +149,32 @@ var Single{{.Name}}Loaders map[int]Single{{.Name}}Loader = map[int]Single{{.Name
 	{{$lvl}}:{{$.Visibility}}oad{{title $name}}_lvl{{itoa $lvl}},{{end}}
 }
 
-func Query{{title .Name}}s(query string, params []interface{}, lvl int) ([]*{{.Name}}, error) {
-	rows, err := Dbase().Query(query, params...)
+func Query{{title .Name}}s(query string, params []interface{}, lvl int, tx *sql.Tx) ([]*{{.Name}}, error) {
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(query, params...)	
+	} else {
+		rows, err = Dbase().Query(query, params...)	
+	}
 	if err != nil {
 		log.Fatal(err)
+		return []*{{.Name}}{}, err
 	}
 	return {{.Name}}Loaders[lvl](rows)
 }
 
-func Query{{title .Name}}(query string, params []interface{}, lvl int) (*{{.Name}}, error) {
-	rows, err := Dbase().Query(query, params...)
+func Query{{title .Name}}(query string, params []interface{}, lvl int, tx *sql.Tx) (*{{.Name}}, error) {
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(query, params...)
+	} else {
+		rows, err = Dbase().Query(query, params...)
+	}
 	if err != nil {
 		log.Fatal(err)
+		return nil, err
 	}
 	return Single{{.Name}}Loaders[lvl](rows)
 }
@@ -170,7 +195,7 @@ func {{.Name}}From(lvl int) string {
 	return {{.Name}}Froms[lvl]()
 }
 
-func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
+func Insert{{title .Name}}(entity *{{.Name}}, tx *sql.Tx) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
 	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
 	if entity.{{referenceonly .Name}} == nil {
 		values = append(values, nil)
@@ -178,10 +203,26 @@ func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Field
 		values = append(values, entity.{{.Name}})
 	}{{else}}
 	values = append(values, entity.{{.Name}}){{end}}{{end}}
-	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, values...){{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
+	if len(values) == 0 {
+		if tx != nil {
+			_, err = tx.Exec(`INSERT INTO {{.Table}} DEFAULT VALUES`)
+		} else {
+			_, err = Dbase().Exec(`INSERT INTO {{.Table}} DEFAULT VALUES`)
+		}
+		return
+	}
+	if tx != nil {
+		_, err = tx.Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, values...)
+	} else {
+		_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, values...)
+	}/*
+	{{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
 	if len(entity.{{.FieldName}}) > 0 {
 		for _, rel := range entity.{{.Field}} {
-			err = Insert{{.Type}}(rel)
+			err = Insert{{.Type}}(rel, tx)
+			if err != nil {
+				return
+			}
 		}
 	}{{end}}{{if .IsManyToMany}}
 	if len(entity.{{.Field}}) > 0 {
@@ -192,13 +233,16 @@ func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$sfields := .Field
 			linkEntity.{{$tolinktpe}}ID = rel.ID {{range $natffields}}{{if .IsLinkField}}
 			linkEntity.{{fieldshift .Name}} = rel.{{fieldshift .Name}}{{end}}{{end}}{{range .SubRelations $relations}}{{if .LinkRelation}}
 			linkEntity.{{.Type}}.ID = rel.{{.Type}}.ID{{end}}{{end}}
-			err = Insert{{.LinkType}}(linkEntity)
+			err = Insert{{.LinkType}}(linkEntity, tx)
+			if err != nil {
+				return
+			}
 		}
-	}{{end}}{{end}}
+	}{{end}}{{end}}*/
 	return
 }
 
-func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffiltersliceandid .Fields}}
+func Update{{title .Name}}(entity *{{.Name}}, tx *sql.Tx) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == 0 {
 		return errors.New("Cannot update without entity identifier")
 	}{{$l := len $natfields}}
@@ -213,7 +257,11 @@ func Update{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffil
 	queryPrts = append(queryPrts, `SET {{switch2fk .}} = ${{plus1 $fi}}`){{end}}
 	queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IdColumn}} = ${{plus1 $l}}`
 	updateFields = append(updateFields, entity.ID)
-	_, err = Dbase().Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
+	if tx != nil {
+		_, err = tx.Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
+	} else {
+		_, err = Dbase().Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
+	}
 	return
 }
 
@@ -227,20 +275,36 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
 }
 
-func Insert{{title .Name}}(entity *{{.Name}}) (err error) { {{$natfields := ffilternatid .Fields}}
-	_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
+func Insert{{title .Name}}(entity *{{.Name}}, tx *sql.Tx) (err error) { {{$natfields := ffilternatid .Fields}}
+	if tx != nil {
+		_, err = tx.Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
+	} else {
+		_, err = Dbase().Exec(`INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
+	}
 	return
 }
 
-func Query{{title .Name}}(query string, params []interface{}, lvl int) (*{{.Name}}, error) {
-	row := Dbase().QueryRow(query, params...)
+func Query{{title .Name}}(query string, params []interface{}, lvl int, tx *sql.Tx) (*{{.Name}}, error) {
+	var row *sql.Row
+	if tx != nil {
+		row = Dbase().QueryRow(query, params...)
+	} else {
+		row = tx.QueryRow(query, params...)
+	}
 	return Load{{title .Name}}(row)
 }
 
-func Query{{title .Name}}s(query string, params []interface{}, lvl int) ([]*{{.Name}}, error) {
-	rows, err := Dbase().Query(query, params...)
+func Query{{title .Name}}s(query string, params []interface{}, lvl int, tx *sql.Tx) ([]*{{.Name}}, error) {
+	var rows *sql.Rows
+	var err error
+	if tx != nil {
+		rows, err = tx.Query(query, params...)
+	} else {
+		rows, err = Dbase().Query(query, params...)
+	}
 	if err != nil {
 		log.Fatal(err)
+		return []*{{.Name}}{}, err
 	}
 	return Load{{title .Name}}s(rows)
 }

@@ -557,7 +557,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 var aliases map[string]int
 
 func checkDuplicateAlias(s *structToken) {
-	aliases = make(map[string]int, len(s.Relations))
+	aliases = make(map[string]int, len(s.Relations)+10)
 	checkAlias(s.Relations)
 }
 
@@ -568,6 +568,7 @@ func checkAlias(rels []*relation) {
 			continue
 		}
 		clearAlias(rel)
+		clearLinkAlias(rel)
 	}
 }
 
@@ -581,6 +582,18 @@ func clearAlias(rel *relation) {
 	}
 	clearAlias(rel)
 	aliases[rel.Alias] = 1
+}
+
+func clearLinkAlias(rel *relation) {
+	if _, ok := aliases[rel.LinkAlias]; ok {
+		//already exists
+		rel.LinkAlias = "x" + rel.LinkAlias
+	} else {
+		aliases[rel.LinkAlias] = 1
+		return
+	}
+	clearLinkAlias(rel)
+	aliases[rel.LinkAlias] = 1
 }
 
 func addRelation(relations []*relation, tpe *relation) []*relation {
