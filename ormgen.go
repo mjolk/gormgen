@@ -336,6 +336,16 @@ func (r *relation) SubRelations(rels []*relation) []*relation {
 	return res
 }
 
+func (r *relation) HasChildIsList(rels []*relation) bool {
+	children := r.AllSubRelations(rels)
+	for _, child := range children {
+		if child.IsManyToMany() || child.IsOneToMany() {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *relation) AllSubRelations(rels []*relation) []*relation {
 	lookup := r.SubRelations(rels)
 	children := make([]*relation, len(lookup))

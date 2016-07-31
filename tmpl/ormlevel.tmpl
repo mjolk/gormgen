@@ -4,6 +4,7 @@ package {{.PackageName}}
 
 import (
 	"database/sql"
+	"github.com/lib/pq"
 	"errors"
 )
 {{$level := .Level}}
@@ -40,18 +41,16 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 	var err error
 	result := make([]*{{.Name}}, 0)
 	for rs.Next() {
-		t := newSqlProxy{{.Name}}(){{range .RootRelations}}{{if .IsManyToOne}}
-		t.proxy{{.ProxyFieldName}} = newSqlProxy{{.Type}}(){{end}}{{end}}{{range .Relations}}
-		t.{{.ProxyFieldName}} = {{if .Proxy}}newSqlProxy{{.Type}}(){{else}}new(sql{{.Type}}){{end}}{{end}}
-		if err = rs.Scan({{range .Fields}}
-			&t.{{.Name}},{{end}}
-		); err != nil {
+		dest := []interface{}{ {{range .Fields}}
+	{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new(pq.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else -}}new(sql.RawBytes){{end}},{{end}}
+		}
+		if err = rs.Scan(dest...); err != nil {
 			return nil, err
 		}
-		s := newProxy{{.Name}}(){{range .RootRelations}}{{if .IsManyToOne}}
-		s.proxy{{.ProxyFieldName}} = newSqlProxy{{.Type}}(){{end}}{{end}}{{range .Relations}}
-		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{end}}{{range .Fields}}
-		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(t.{{.Name}}){{else if isbool .Type}}checkSqlBoolValue(t.{{.Name}}){{ else if istime .Type}}checkSqlTimeValue(t.{{.Name}}){{else if isbyte .Type}}t.{{.Name}}{{else}}checkSqlStringValue(t.{{.Name}}){{end}}{{end}}
+		s := newProxy{{.Name}}(){{$allrel := .Relations}}{{range .Relations}}
+		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{if .IsManyToOne}}{{if .HasChildIsList $allrel}}
+		s.{{reproxyfy .ProxyFieldName}} = newProxy{{.Type}}(){{end}}{{end}}{{end}}{{range $idx, $field := .Fields}}
+		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(dest[{{$idx}}]){{else if isbool .Type}}checkSqlBoolValue(dest[{{$idx}}]){{ else if istime .Type}}checkSqlTimeValue(dest[{{$idx}}]){{else if isbyte .Type}}*dest[{{$idx}}].(*[]byte){{else}}checkSqlStringValue(dest[{{$idx}}]){{end}}{{end}}
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {
@@ -89,11 +88,9 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 				}
 			}
 			if !{{tovar .Relation.FieldName}}Exists { {{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}
-				new{{.Relation.Type}} := new({{.Relation.Type}}){{$tok := structtok .Relation.Type}}{{range $tok.RootRelations}}{{if .IsManyToOne}}
-				new{{$omntpe}}.{{.FieldName}} = new({{.Type}}){{end}}{{end}}
+				new{{.Relation.Type}} := new({{.Relation.Type}})
 				{{range $a, $b := $omfiltrd}}{{if $a}}
-				{{end}}new{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{if .Relation.IsManyToMany}}{{$lfilterd := ffilter $fields .Relation.LinkField}}{{range $c, $d := $lfilterd}}{{if $c}}
-				{{end}}newLINK{{$omntpe}}.{{proxyshift .Name}} = s.{{.Name}}{{end}}{{end}}{{end}}
+				{{end}}new{{$omntpe}}.{{proxyshift .}} = s.{{.}}{{end}}{{end}}
 				{{range .Relation.SubRelations .Token.Relations}}{{template "merge" relarg $token . $relation $root}}{{end}}
 				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}{{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, new{{.Relation.Type}}){{else}}
 				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, new{{.Relation.Type}}){{end}}

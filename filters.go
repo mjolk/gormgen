@@ -39,6 +39,8 @@ var (
 			}
 			return false
 		},
+		"reproxyfy":         Reproxyfy,
+		"tolower":           strings.ToLower,
 		"linkprops":         LinkPropertiesFor,
 		"linkrels":          LinkRelationsFor,
 		"itoa":              strconv.Itoa,
@@ -72,6 +74,16 @@ var (
 			return x - 1
 		}}
 )
+
+func Reproxyfy(name string) string {
+	prts := strings.Split(name, ".")
+	for i, prt := range prts {
+		if !strings.HasPrefix(prt, "proxy") {
+			prts[i] = "proxy" + prts[i]
+		}
+	}
+	return strings.Join(prts, ".")
+}
 
 func DeProxyfyFieldName(name string) string {
 	return strings.Replace(name, "proxy", "", -1)
@@ -208,16 +220,42 @@ func CheckParent(rel *relation) bool {
 	return false
 }
 
-func FilterRelations(fields []*fieldToken, prefix string) []*fieldToken {
-	fts := make([]*fieldToken, 0)
+func FilterRelations(fields []*fieldToken, prefix string) []string {
+	fts := make([]string, 0)
 	prefixLen := len(strings.Split(prefix, "."))
 	for _, field := range fields {
 		fldPrts := strings.Split(field.Name, ".")
+		fldLen := len(fldPrts)
 		if strings.HasPrefix(field.Name, prefix) && !hasChildLists(prefixLen, fldPrts) {
-			fts = append(fts, field)
+			if !strings.HasPrefix(fldPrts[fldLen-2], "proxy") {
+				add := strings.Join(fldPrts[:fldLen-1], ".")
+				nw := true
+				for _, added := range fts {
+					if added == add {
+						nw = false
+					}
+				}
+				if nw {
+					fts = append(fts, add)
+				}
+			} else {
+				fts = append(fts, field.Name)
+			}
 		}
 	}
 	return fts
+}
+
+func hasChildLists(prefixLen int, field []string) bool {
+	lField := len(field)
+	if prefixLen < lField {
+		for i := prefixLen; i < lField; i++ {
+			if strings.Contains(field[i], "proxy") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func FieldToVariableName(field string) string {
@@ -380,18 +418,6 @@ func NativeField(field string) bool {
 		return false
 	}
 	return true
-}
-
-func hasChildLists(prefixLen int, field []string) bool {
-	lField := len(field)
-	if prefixLen < lField {
-		for i := prefixLen; i < lField; i++ {
-			if strings.Contains(field[i], "proxy") {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func lookUpAlias(rels []*relation, lookup string, prts []string) string {

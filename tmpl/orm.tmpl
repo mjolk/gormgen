@@ -12,28 +12,32 @@ import (
 	"fmt"
 )
 
-func checkSqlInt64Value(val sql.NullInt64) int64 {
+func checkSqlInt64Value(v interface{}) int64 {
+	val := v.(*sql.NullInt64)
 	if !val.Valid {
 		return 0
 	}
 	return val.Int64
 }
 
-func checkSqlStringValue(val sql.NullString) string {
+func checkSqlStringValue(v interface{}) string {
+	val := v.(*sql.NullString)
 	if !val.Valid {
 		return ""
 	}
 	return val.String
 }
 
-func checkSqlBoolValue(val sql.NullBool) bool {
+func checkSqlBoolValue(v interface{}) bool {
+	val := v.(*sql.NullBool)
 	if !val.Valid {
 		return false
 	}
 	return val.Bool
 }
 
-func checkSqlTimeValue(val pq.NullTime) time.Time {
+func checkSqlTimeValue(v interface{}) time.Time {
+	val := v.(*pq.NullTime)
 	if !val.Valid {
 		return time.Time{}
 	}
@@ -44,15 +48,16 @@ func checkSqlTimeValue(val pq.NullTime) time.Time {
 {{$levels := .Levels}}
 
 {{range .Tokens}}
+
 //postgresql specific shit
 func {{.Name}}LastInsertID(tx *sql.Tx) (int64, error) {
-	var nId int64
+       var nId int64
 
-	//postgresql way of retrieving the last inserted id inside a tx, concurrent safe
-	if err := tx.QueryRow("select currval('{{tolower .Name}}_{{tolower .IdColumn}}_seq')").Scan(&nId); err != nil {
-		return 0, err
-	}
-	return nId, nil
+       //postgresql way of retrieving the last inserted id inside a tx, concurrent safe
+       if err := tx.QueryRow("select currval('{{tolower .Name}}_{{tolower .IdColumn}}_seq')").Scan(&nId); err != nil {
+               return 0, err
+       }
+       return nId, nil
 }
 
 {{$native := native .Fields}}{{$linkfields := linkprops .Name}}{{$linkrels := linkrels .Name}}
