@@ -5,7 +5,7 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"
-	"errors"
+	"fmt"
 )
 {{$level := .Level}}
 {{$levels := .Levels}}
@@ -32,7 +32,9 @@ func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Na
 		return nil, err
 	}
 	if len(result) > 1 {
-		return nil, errors.New("More than one result") 
+		return nil, fmt.Errorf("More than one result, %d results found", len(result)) 
+	} else if len(result) == 0 {
+		return nil, fmt.Errorf("No result found")	
 	}
 	return result[0], nil
 }
@@ -54,11 +56,9 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {
-			if ent != nil {
-				if ent.ID == s.ID {
-					entity = ent
-					newID = false
-				}
+			if ent.ID == s.ID {
+				entity = ent
+				newID = false
 			}
 		}{{$token := .}}
 		{{range .RootRelations}}
