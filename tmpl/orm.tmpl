@@ -104,11 +104,38 @@ func (q *{{.Name}}Query) Or(prop string, value interface{}) *{{.Name}}Query {
 	return q
 }
 
+func (q *{{.Name}}Query) Limit(value int) *{{.Name}}Query {
+	q.params = append(q.params, value)
+	q.query = fmt.Sprintf("%s LIMIT %d", q.query, len(q.params))
+	return q
+}
+
 //TODO allow multiple columns to sort on
 func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
 	q.query = fmt.Sprintf("%s ORDER BY %s %s", q.query, {{.Name}}PropToSql[prop], dir)
 	return q
 }
+
+func (q *{{.Name}}Query) KeyUp(prop string, start, limit int) *{{.Name}}Query {
+	q.params = append(q.params, start)
+	sqlProp := {{.Name}}PropToSql[prop]
+	if start > 0 {
+		q.query = fmt.Sprintf("%s WHERE %s > $%d ORDER BY %s ASC LIMIT %d", q.query, sqlProp,
+			len(q.params), sqlProp, limit)
+	} else {
+		q.query = fmt.Sprintf("%s ORDER BY %s ASC LIMIT %d", q.query, sqlProp, limit)
+	}
+	return q
+}
+
+func (q *{{.Name}}Query) KeyDown(prop string, start, limit int) *{{.Name}}Query {
+	q.params = append(q.params, start)
+	sqlProp = {{.Name}}PropToSql[prop]
+	q.query = fmt.Sprintf("%s FROM ( %s WHERE %s < $%d ORDER BY %s DESC LIMIT %d) AS t ORDER BY t.%s ASC", 
+			{{.Name}}Select(q.depth), q.query, sqlProp, len(q.params), sqlProp, limit, sqlProp)
+	return q	
+}
+	
 
 func (q *{{.Name}}Query) Execute(tx *sql.Tx) ([]*{{.Name}}, error) {
 	return Query{{title .Name}}s(q.query, q.params, q.depth, tx)
