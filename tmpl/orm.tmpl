@@ -114,22 +114,27 @@ func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
 }
 
 func (q *{{.Name}}Query) KeyUp(prop string, start, limit int) *{{.Name}}Query {
-	q.params = append(q.params, start)
 	sqlProp := {{.Name}}PropToSql[prop]
+	q.params = append(q.params, limit)
+	q.query = strings.Replace(q.query, "FROM [SCHEMA].{{tolower .Name}}", "FROM (SELECT * FROM [SCHEMA].{{tolower .Name}} LIMIT $1) AS", 1)
 	if start > 0 {
-		q.query = fmt.Sprintf("%s WHERE %s > $%d ORDER BY %s ASC LIMIT %d", q.query, sqlProp,
-			len(q.params), sqlProp, limit)
+		q.params = append(q.params, start)
+		q.query = fmt.Sprintf("%s WHERE %s > $2 ORDER BY %s ASC", q.query, sqlProp, sqlProp)
 	} else {
-		q.query = fmt.Sprintf("%s ORDER BY %s ASC LIMIT %d", q.query, sqlProp, limit)
+		q.query = fmt.Sprintf("%s ORDER BY %s ASC", q.query, sqlProp)
 	}
 	return q
 }
 
 func (q *{{.Name}}Query) KeyDown(prop string, start, limit int) *{{.Name}}Query {
 	q.params = append(q.params, start)
+	q.params = append(q.params, limit)
 	sqlProp := {{.Name}}PropToSql[prop]
-	q.query = fmt.Sprintf(`%s FROM ( %s WHERE %s < $%d ORDER BY %s DESC LIMIT %d) AS t ORDER BY t.%s ASC`, 
-			{{.Name}}Select(q.depth), q.query, sqlProp, len(q.params), sqlProp, limit, sqlProp)
+	props := strings.Split(sqlProp, ".")
+	q.query = strings.Replace(q.query, "FROM [SCHEMA].{{tolower .Name}}", "FROM (SELECT * FROM [SCHEMA].{{tolower .Name}} WHERE %s < $1 ORDER BY %s DESC LIMIT $2) AS", 1)
+	q.query = fmt.Sprintf(q.query, props[len(props)-1], props[len(props)-1])
+	q.query = fmt.Sprintf(`SELECT t.* FROM ( %s ) AS t ORDER BY t.%s ASC`, 
+			q.query, props[len(props)-1])
 	return q	
 }
 	
