@@ -77,23 +77,27 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 {{end}}{{end}}
 
 {{define "merge"}}
-{{$token := .Token}}{{$relation := .Relation}}{{$root := .RootRelation}}{{$fields:= .Token.Fields}}{{$relations := .Token.Relations}}{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}{{tovar .Relation.FieldName}}Exists := false
+{{$token := .Token}}{{$relation := .Relation}}{{$root := .RootRelation}}{{$fields:= .Token.Fields}}{{$relations := .Token.Relations}}{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}New{{tovar .Relation.FieldName}}ID := true
 		if s.{{.Relation.ProxyFieldName}}.ID != 0 { {{$parentlist := listfields .ParentRelation}}
+			var new{{.Relation.Type}} *{{.Relation.Type}}
 			if len({{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}) > 0 {
 				for _, rel := range {{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} {
 					if rel.ID == s.{{.Relation.ProxyFieldName}}.ID {
-						{{tovar .Relation.FieldName}}Exists = true
+						New{{tovar .Relation.FieldName}}ID = false
+						new{{.Relation.Type}} = rel
+					} else {
+						new{{.Relation.Type}} = new({{.Relation.Type}})
 					}
 				}
+			} else {
+				new{{.Relation.Type}} = new({{.Relation.Type}})
 			}
-			if !{{tovar .Relation.FieldName}}Exists { {{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}
-				new{{.Relation.Type}} := new({{.Relation.Type}})
+			if New{{tovar .Relation.FieldName}}ID { {{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}
 				{{range $a, $b := $omfiltrd}}{{if $a}}
-				{{end}}new{{$omntpe}}.{{proxyshift .}} = s.{{.}}{{end}}{{end}}
+				{{end}}new{{$omntpe}}.{{proxyshift .}} = s.{{.}}{{end}} }{{end}}
 				{{range .Relation.SubRelations .Token.Relations}}{{template "merge" relarg $token . $relation $root}}{{end}}
-				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}{{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, new{{.Relation.Type}}){{else}}
-				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, new{{.Relation.Type}}){{end}}
-			}
+				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}if New{{tovar .Relation.FieldName}}ID { {{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}new{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}new{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, new{{.Relation.Type}})}{{else}}
+				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, new{{.Relation.Type}})}{{end}}
 		}{{end}}
 {{end}}
 
