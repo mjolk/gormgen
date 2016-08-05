@@ -92,13 +92,14 @@ type fieldToken struct {
 }
 
 type structToken struct {
-	IdColumn  string
-	Name      string
-	Fields    []*fieldToken
-	Composite bool
-	Relations []*relation
-	Table     string
-	Alias     string
+	IdColumn   string
+	Name       string
+	Fields     []*fieldToken
+	Composite  bool
+	Relations  []*relation
+	Table      string
+	Alias      string
+	LinkEntity bool
 }
 
 type context struct {
@@ -181,6 +182,7 @@ var (
 	inputLevel    int
 	maxLevel      int
 	structLookup  map[string]*structToken
+	linkStructs   map[string]bool = make(map[string]bool, 0)
 	newStructToks []*structToken
 	baseFileName  string
 	packageName   string
@@ -273,6 +275,9 @@ func generate(mLevel int, structs []*structToken, tmpl, tmplName string) {
 		}
 		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
+		if ok, _ := linkStructs[newStructTk.Name]; ok {
+			newStructTk.LinkEntity = true
+		}
 		//log.Printf("============entity name : %s =================== \n", newStructTk.Name)
 		//sep := ""
 		/*for _, rel := range newStructTk.RootRelations() {
@@ -534,6 +539,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				lnCtx.IsLink = true
 				lnCtx.Link = field.Link
 				linkStruct := structLookup[field.Link]
+				linkStructs[linkStruct.Name] = true
 				rel.RelationType = MANYTOMANY
 				rel.LinkAlias = field.LinkAlias
 				rel.From = src.IdColumn
@@ -574,7 +580,6 @@ func checkDuplicateAlias(s *structToken) {
 func checkAlias(rels []*relation) {
 	for _, rel := range rels {
 		if rel.Alias == "" {
-			//log.Printf("relation %s of type %s has no alias \n", rel.FieldName, rel.RelationType)
 			continue
 		}
 		clearAlias(rel)
