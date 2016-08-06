@@ -39,6 +39,7 @@ var (
 			}
 			return false
 		},
+		"typeprefix":        TypePrefix,
 		"reproxyfy":         Reproxyfy,
 		"tolower":           strings.ToLower,
 		"linkprops":         LinkPropertiesFor,
@@ -74,6 +75,37 @@ var (
 			return x - 1
 		}}
 )
+
+func TypePrefix(r *relation, baseType string) string {
+	var parent *relation
+	var skip int
+	prefix := "new"
+	lstType := r.Type
+	if baseType != "" {
+		if strings.Contains(baseType, ".") {
+			basePrts := strings.Split(baseType, ".")
+			lstType = basePrts[0]
+		} else {
+			lstType = baseType
+		}
+		skip++
+	}
+	lr := r
+	for !lr.Parent().IsRoot {
+		parent = lr.Parent()
+		if parent.IsManyToMany() || parent.IsOneToMany() {
+			if parent.Type == lstType {
+				if skip > 0 {
+					skip--
+				} else {
+					prefix = prefix + "_"
+				}
+			}
+		}
+		lr = parent
+	}
+	return prefix
+}
 
 func Reproxyfy(name string) string {
 	prts := strings.Split(name, ".")
