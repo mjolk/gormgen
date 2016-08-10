@@ -2,8 +2,7 @@
 
 ###Todo
 
-1. Alter query template to support table prefix depending on user company schema property
-2. Soft delete?
+* switch out dialect specific parts with configurable template blocks  
 
 ### Install
 ```
