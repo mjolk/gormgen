@@ -2,7 +2,8 @@
 
 ###Todo
 
-* switch out dialect specific parts with configurable template blocks  
+* switch out dialect specific parts with configurable template blocks
+* make it possible to alter (relation) queries via configurable templating
 
 ### Install
 ```
