@@ -49,9 +49,9 @@ func checkSqlTimeValue(v interface{}) time.Time {
 {{range .Tokens}}
 
 //postgresql specific shit
-func {{.Name}}LastInsertID(ctx SqlContext) (int64, error) {
+func {{.Name}}LastInsertID(ctx SQLContext) (int64, error) {
        	var nId int64
-       	if err := ctx.Tx().QueryRow(strings.Replace("select currval('[SCHEMA].{{tolower .Name}}_{{tolower .IdColumn}}_seq')", "[SCHEMA]", ctx.Schema(), -1)).Scan(&nId); err != nil {
+       	if err := ctx.QueryRow(strings.Replace("select currval('[SCHEMA].{{tolower .Name}}_{{tolower .IDColumn}}_seq')", "[SCHEMA]", ctx.Schema(), -1)).Scan(&nId); err != nil {
                	return 0, err
        	}
        	return nId, nil
@@ -139,31 +139,34 @@ func (q *{{.Name}}Query) KeyDown(prop string, start, limit int) *{{.Name}}Query 
 }
 	
 
-func (q *{{.Name}}Query) Execute(ctx SqlContext) ([]*{{.Name}}, error) {
+func (q *{{.Name}}Query) Execute(ctx SQLContext) ([]*{{.Name}}, error) {
 	q.query = strings.Replace(q.query, "[SCHEMA]", ctx.Schema(), -1)
 	return Query{{title .Name}}s(q.query, q.params, q.depth, ctx)
 }
 
-func (q *{{.Name}}Query) Single(ctx SqlContext) (*{{.Name}}, error) {
+func (q *{{.Name}}Query) Single(ctx SQLContext) (*{{.Name}}, error) {
 	q.query = strings.Replace(q.query, "[SCHEMA]", ctx.Schema(), -1)
 	return Query{{title .Name}}(q.query, q.params, q.depth, ctx)
 }
 
-func Find{{title .Name}}ByID(id int, lvl int, ctx SqlContext) (*{{.Name}}, error) {
+func Find{{title .Name}}ByID(id int, lvl int, ctx SQLContext) (*{{.Name}}, error) {
         return New{{.Name}}Query(lvl).Where("ID", "=", id).Single(ctx)
 }
 
 {{if not .LinkEntity}}
-func Delete{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) {
+func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
 	if entity.ID == 0 {
 		return errors.New("Cannot delete without entity identifier")
 	}
-	query := strings.Replace("DELETE FROM [SCHEMA].{{.Table}} WHERE {{.IdColumn}} = $1", "[SCHEMA]", ctx.Schema(), -1)
-	if ctx.Tx() != nil {
-		_, err = ctx.Tx().Exec(query, entity.ID)
-	} else {
-		_, err = Dbase().Exec(query, entity.ID)
-	}
+	query := strings.Replace("DELETE FROM [SCHEMA].{{.Table}} WHERE {{.IDColumn}} = $1", "[SCHEMA]", ctx.Schema(), -1)
+	_, err = ctx.Exec(query, entity.ID)
+	return
+}
+{{else}}//hack - need to check if this is a good permanent solution and not only for this schema
+func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}
+	queryWhere := `WHERE {{range $fi, $fld := $natfields}}{{if $fi}} AND {{end}}{{.Column}} = ${{plus1 $fi}}{{end}}`
+	query := strings.Replace("DELETE FROM [SCHEMA].{{.Table}} " + queryWhere, "[SCHEMA]", ctx.Schema(), -1)
+	_, err = ctx.Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
 	return
 }
 {{end}}
@@ -181,14 +184,8 @@ var Single{{.Name}}Loaders map[int]Single{{.Name}}Loader = map[int]Single{{.Name
 	{{$lvl}}:{{$.Visibility}}oad{{title $name}}_lvl{{itoa $lvl}},{{end}}
 }
 
-func Query{{title .Name}}s(query string, params []interface{}, lvl int, ctx SqlContext) ([]*{{.Name}}, error) {
-	var rows *sql.Rows
-	var err error
-	if ctx.Tx() != nil {
-		rows, err = ctx.Tx().Query(query, params...)	
-	} else {
-		rows, err = Dbase().Query(query, params...)	
-	}
+func Query{{title .Name}}s(query string, params []interface{}, lvl int, ctx SQLContext) ([]*{{.Name}}, error) {
+	rows, err := ctx.Query(query, params...)
 	if err != nil {
 		log.Fatal(err)
 		return []*{{.Name}}{}, err
@@ -196,14 +193,8 @@ func Query{{title .Name}}s(query string, params []interface{}, lvl int, ctx SqlC
 	return {{.Name}}Loaders[lvl](rows)
 }
 
-func Query{{title .Name}}(query string, params []interface{}, lvl int, ctx SqlContext) (*{{.Name}}, error) {
-	var rows *sql.Rows
-	var err error
-	if ctx.Tx() != nil {
-		rows, err = ctx.Tx().Query(query, params...)
-	} else {
-		rows, err = Dbase().Query(query, params...)
-	}
+func Query{{title .Name}}(query string, params []interface{}, lvl int, ctx SQLContext) (*{{.Name}}, error) {
+	rows, err := ctx.Query(query, params...)
 	if err != nil {
 		log.Fatal(err)
 		return nil, err
@@ -229,7 +220,7 @@ func {{.Name}}From(lvl int) string {
 
 
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
 	var query string
 	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
 	if entity.{{referenceonly .Name}} == nil {
@@ -244,11 +235,8 @@ func Insert{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$s
 		query = `INSERT INTO [SCHEMA].{{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
 	}
 	query = strings.Replace(query, "[SCHEMA]", ctx.Schema(), -1)
-	if ctx.Tx() != nil {
-		_, err = ctx.Tx().Exec(query, values...)
-	} else {
-		_, err = Dbase().Exec(query, values...)
-	}/*
+	_, err = ctx.Exec(query, values...)
+	/*
 	{{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
 	if len(entity.{{.FieldName}}) > 0 {
 		for _, rel := range entity.{{.Field}} {
@@ -275,7 +263,7 @@ func Insert{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$s
 	return
 }
 
-func Update{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
+func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == 0 {
 		return errors.New("Cannot update without entity identifier")
 	}{{$l := len $natfields}}
@@ -288,15 +276,11 @@ func Update{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$n
 	}{{else}}
 	updateFields = append(updateFields, entity.{{.Name}}){{end}}
 	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
-	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IdColumn}} = ${{plus1 $l}}`
-	queryStr := fmt.Sprintf("SET %s WHERE {{.IdColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
+	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
+	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
 	updateFields = append(updateFields, entity.ID)
 	query := strings.Replace(`UPDATE [SCHEMA].{{.Table}} ` + queryStr, "[SCHEMA]", ctx.Schema(), -1)
-	if ctx.Tx() != nil {
-		_, err = ctx.Tx().Exec(query, updateFields...)
-	} else {
-		_, err = Dbase().Exec(query, updateFields...)
-	}
+	_, err = ctx.Exec(query, updateFields...)
 	return
 }
 {{else}}
@@ -309,48 +293,20 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
 }
 
-{{if .LinkEntity}} //hack - need to check if this is a good permanent solution and not only for this schema
-func Delete{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$natfields := ffilternatid .Fields}}
-	queryWhere := `WHERE {{range $fi, $fld := $natfields}}{{if $fi}} AND {{end}}{{.Column}} = ${{plus1 $fi}}{{end}}`
-	query := strings.Replace("DELETE FROM [SCHEMA].{{.Table}} " + queryWhere, "[SCHEMA]", ctx.Schema(), -1)
-	if ctx.Tx() != nil {
-		_, err = ctx.Tx().Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	} else {
-		_, err = Dbase().Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	}
-	return
-}
-{{end}}
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SqlContext) (err error) { {{$natfields := ffilternatid .Fields}}
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}
 	query := `INSERT INTO [SCHEMA].{{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
 	query = strings.Replace(query, "[SCHEMA]", ctx.Schema(), -1)
-	if ctx.Tx() != nil {
-		_, err = ctx.Tx().Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	} else {
-		_, err = Dbase().Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	}
+	_, err = ctx.Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
 	return
 }
 
-func Query{{title .Name}}(query string, params []interface{}, lvl int, ctx SqlContext) (*{{.Name}}, error) {
-	var row *sql.Row
-	if ctx.Tx() != nil {
-		row = Dbase().QueryRow(query, params...)
-	} else {
-		row = ctx.Tx().QueryRow(query, params...)
-	}
-	return Load{{title .Name}}(row)
+func Query{{title .Name}}(query string, params []interface{}, lvl int, ctx SQLContext) (*{{.Name}}, error) {
+	return Load{{title .Name}}(ctx.QueryRow(query, params...))
 }
 
-func Query{{title .Name}}s(query string, params []interface{}, lvl int, ctx SqlContext) ([]*{{.Name}}, error) {
-	var rows *sql.Rows
-	var err error
-	if ctx.Tx() != nil {
-		rows, err = ctx.Tx().Query(query, params...)
-	} else {
-		rows, err = Dbase().Query(query, params...)
-	}
+func Query{{title .Name}}s(query string, params []interface{}, lvl int, ctx SQLContext) ([]*{{.Name}}, error) {
+	rows, err := ctx.Query(query, params...)
 	if err != nil {
 		log.Fatal(err)
 		return []*{{.Name}}{}, err

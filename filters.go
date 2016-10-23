@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -55,6 +56,7 @@ var (
 		"relarg":            RelationLevel,
 		"switch2fk":         SwitchToFK,
 		"ffiltersliceandid": FilterSliceAndID,
+		"ffilterslice":      FilterSlice,
 		"updatealias":       UpdateAlias2,
 		"ffilternatid":      FilterNonNativeFieldsAndIDs,
 		"ffilterid":         FilterFieldsAndIDs,
@@ -68,6 +70,7 @@ var (
 		"isreference":       FieldIsReference,
 		"referenceonly":     ReferenceOnly,
 		"deproxyfy":         DeProxyfyFieldName,
+		"lookuplink":        LookupLink,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -75,6 +78,14 @@ var (
 			return x - 1
 		}}
 )
+
+func LookupLink(link string) string {
+	l, ok := structLookup[link]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(" references %s(%s)", l.Table, l.IDColumn)
+}
 
 func TypePrefix(r *relation, baseType string) string {
 	var parent *relation
@@ -312,6 +323,25 @@ func SwitchToFK(field *fieldToken) string {
 		}
 	}
 	return field.Column
+}
+
+func FilterSlice(fields []*fieldToken) []*fieldToken {
+	fts := make([]*fieldToken, 0)
+	for _, field := range fields {
+		if strings.Contains(field.Name, "proxy") {
+			continue
+		}
+		prts := strings.Split(field.Name, ".")
+		if len(prts) > 1 {
+			if prts[1] == "ID" {
+				fts = append(fts, field)
+				continue
+			}
+			continue
+		}
+		fts = append(fts, field)
+	}
+	return fts
 }
 
 func FilterSliceAndID(fields []*fieldToken) []*fieldToken {
