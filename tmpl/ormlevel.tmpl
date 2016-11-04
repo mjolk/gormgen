@@ -4,6 +4,7 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"
+	"github.com/satori/go.uuid"
 	"fmt"
 )
 {{$level := .Level}}
@@ -43,7 +44,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 	result := make([]*{{.Name}}, 0)
 	for rs.Next() {
 		dest := []interface{}{ {{range .Fields}}
-	{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new(pq.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else -}}new(sql.RawBytes){{end}},{{end}}
+		{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new(pq.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else if isuuid .Type}}new(uuid.NullUUID){{else -}}new(sql.RawBytes){{end}},{{end}}
 		}
 		if err = rs.Scan(dest...); err != nil {
 			return nil, err
@@ -51,7 +52,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 		s := newProxy{{.Name}}(){{$allrel := .Relations}}{{range .Relations}}
 		s.{{.ProxyFieldName}} = {{if .Proxy}}newProxy{{.Type}}(){{else}}new({{.Type}}){{end}}{{if .IsManyToOne}}{{if .HasChildIsList $allrel}}
 		s.{{reproxyfy .ProxyFieldName}} = newProxy{{.Type}}(){{end}}{{end}}{{end}}{{range $idx, $field := .Fields}}
-		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(dest[{{$idx}}]){{else if isbool .Type}}checkSqlBoolValue(dest[{{$idx}}]){{ else if istime .Type}}checkSqlTimeValue(dest[{{$idx}}]){{else if isbyte .Type}}*dest[{{$idx}}].(*[]byte){{else}}checkSqlStringValue(dest[{{$idx}}]){{end}}{{end}}
+		s.{{.Name}} = {{if isint .Type}}checkSqlInt64Value(dest[{{$idx}}]){{else if isbool .Type}}checkSqlBoolValue(dest[{{$idx}}]){{ else if istime .Type}}checkSqlTimeValue(dest[{{$idx}}]){{else if isbyte .Type}}*dest[{{$idx}}].(*[]byte){{else if isuuid .Type}}checkSqlUUIDValue(dest[{{$idx}}]){{else}}checkSqlStringValue(dest[{{$idx}}]){{end}}{{end}}
 		entity := s.{{.Name}}
 		var newID bool = true
 		for _, ent := range result {

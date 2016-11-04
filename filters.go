@@ -40,6 +40,12 @@ var (
 			}
 			return false
 		},
+		"isuuid": func(tpe string) bool {
+			if tpe == "uuid.UUID" {
+				return true
+			}
+			return false
+		},
 		"typeprefix":        TypePrefix,
 		"reproxyfy":         Reproxyfy,
 		"tolower":           strings.ToLower,
@@ -54,6 +60,7 @@ var (
 		"norel":             FilterRelations,
 		"tovar":             FieldToVariableName,
 		"relarg":            RelationLevel,
+		"schemarg":          Schemarg,
 		"switch2fk":         SwitchToFK,
 		"ffiltersliceandid": FilterSliceAndID,
 		"ffilterslice":      FilterSlice,
@@ -312,6 +319,33 @@ func RelationLevel(token *structToken, relation, parent, root *relation) Relatio
 		ParentRelation: parent,
 		RootRelation:   root,
 	}
+}
+
+type Schema struct {
+	Schema string
+	Tables []*structToken
+}
+
+func updateSchema(schema *[]Schema, sch *structToken) {
+	rs := *schema
+	defer func() {
+		*schema = rs
+	}()
+	for i := range rs {
+		if rs[i].Schema == sch.Schema {
+			rs[i].Tables = append(rs[i].Tables, sch)
+			return
+		}
+	}
+	rs = append(rs, Schema{Schema: sch.Schema, Tables: []*structToken{sch}})
+}
+
+func Schemarg(tables []*structToken) []Schema {
+	schemas := make([]Schema, 0)
+	for _, table := range tables {
+		updateSchema(&schemas, table)
+	}
+	return schemas
 }
 
 func SwitchToFK(field *fieldToken) string {

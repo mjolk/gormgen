@@ -113,6 +113,7 @@ type structToken struct {
 	Alias        string `json:"alias"`
 	LinkEntity   bool
 	CompositeKey []string `json:"compositeKey"`
+	Schema       string
 }
 
 type context struct {
@@ -289,6 +290,7 @@ func generateMetadata(src []*structToken) []*structToken {
 			Alias:        structTk.Alias,
 			IDColumn:     structTk.IDColumn,
 			CompositeKey: structTk.CompositeKey,
+			Schema:       structTk.Schema,
 		}
 		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
@@ -316,8 +318,6 @@ func generate(mLevel int, data []*structToken, tmpl, tmplName string) {
 	case "entity":
 	default:
 		data = generateMetadata(data)
-		log.Printf("%v\n", linkStructs)
-
 	}
 
 	if err := genFile(fileName, data, mLevel, tmpl, tmplName); err != nil {

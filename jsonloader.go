@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,7 +17,7 @@ func (a ByIndex) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByIndex) Less(i, j int) bool { return a[i].Index < a[j].Index }
 
 func selectCfg() ([]string, error) {
-	files, err := filepath.Glob("*.json")
+	files, err := filepath.Glob("**/*.json")
 	if err != nil {
 		return []string{}, err
 	}
@@ -34,6 +35,10 @@ func loadFile(file string, cfgCh chan<- []*structToken, errCh chan<- error) {
 	if err != nil {
 		errCh <- fmt.Errorf("%s \nfor file: %s\n", err, file)
 		return
+	}
+	prts := strings.Split(file, "/")
+	for i := range cts {
+		cts[i].Schema = prts[0]
 	}
 	cfgCh <- cts
 }
@@ -54,6 +59,7 @@ func loadJSON() ([]*structToken, error) {
 	}
 
 	for _, file := range files {
+		log.Printf("file: %s\n", file)
 		go loadFile(file, cfgCh, errCh)
 	}
 

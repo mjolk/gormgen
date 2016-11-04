@@ -4,12 +4,21 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"
+	"github.com/satori/go.uuid"
 	"errors"
 	"log"
 	"strings"
 	"time"
 	"fmt"
 )
+
+func checkSqlUUIDValue(v interface{}) uuid.UUID {
+	val := v.(*uuid.NullUUID)
+	if !val.Valid{
+		return uuid.UUID{}	
+	}
+	return val.UUID
+} 
 
 func checkSqlInt64Value(v interface{}) int64 {
 	val := v.(*sql.NullInt64)

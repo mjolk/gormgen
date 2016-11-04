@@ -5,12 +5,13 @@ import "fmt"
 
 const ( {{range .Tokens}} {{$natfields := ffilterslice .Fields}}{{$nlen := len $natfields | min1}}
 	{{.Name}}Table = `
-	create table %s.{{ .Table}}({{range $fi, $fld := $natfields}}
+	create table if not exists %s.{{ .Table}}({{range $fi, $fld := $natfields}}
 	  {{if .Relation}}{{template "relation" .}}{{else }}{{.Column}} {{.SQLType}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if .Primary }} primary key{{else}}{{if .Unique}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{if .Delete}} on delete {{.Delete}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
 	  primary key({{range $fii, $ckd := .CompositeKey}}{{if $fii}},{{end}}{{.}}{{end}}){{end}}
 	);`
 {{end}}
 )
+
 {{range .Tokens}}
 func create{{.Name}}Table(schema string) string {
 	return fmt.Sprintf({{.Name}}Table, schema)
@@ -37,6 +38,55 @@ func New(schema string, st []string) []string {
 	}
 	return tstrings
 }
+
+func InitSchema(schema string) []string {
+	return []string{
+		fmt.Sprintf(typeSetup, schema),
+		fmt.Sprintf(actionSetup, schema),
+		fmt.Sprintf(optionsSetup, schema),
+		fmt.Sprintf(attributeTypeSetup, schema),
+		fmt.Sprintf(userTypeSetup, schema),
+		fmt.Sprintf(languageSetup, schema),
+	}
+}
+
+{{template "schema" schemarg .Tokens}}
+{{template "setup" .}}
 {{end}}
 
+{{define "schema"}}
+{{range .}}
+var {{title .Schema}}Schema  = []string{ {{range .Tables}}
+	"{{ .Name}}",{{end}}
+}{{end}}
+{{end}}
 {{define "relation"}}{{.Relation.From}} int references {{.Relation.Table}}({{.Relation.To}}){{if .Relation.NotNull}} not null{{end}}{{if .Delete}} on delete {{.Delete}}{{end}}{{end}}
+{{define "setup"}}
+var typeSetup = `
+insert into %s.object_type values {{range $i , $val := .Tokens}}
+	{{if $i}},{{end}}(default, '{{.Name}}', {{.Name}}){{end}};
+`
+var actionSetup =`
+insert into %s.object_action values(default, 'Read', 'read object'),
+(default, 'Create', 'create new object'),
+(default, 'Update', 'update object');
+`
+
+var optionsSetup = `
+insert into %s.question_options values(default, 2, 'Mandatory'),
+(default, 4, 'Add images');`
+
+var attributeTypeSetup = `
+insert into %s.attribute_type values(default, 'file'),
+(default, 'translation'),
+(default, 'contact');`
+
+var userTypeSetup = `
+insert into %s.registration_user_type values(default, 'Admin'),
+(default, 'Client');`
+
+var languageSetup = `
+insert into %s.language values(default, 'eng', 'english'),
+(default, 'nl', 'dutch'),
+(default, 'fr', 'french');`
+{{end}}
