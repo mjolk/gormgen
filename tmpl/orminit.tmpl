@@ -5,8 +5,8 @@ import "fmt"
 
 const ( {{range .Tokens}} {{$natfields := ffilterslice .Fields}}{{$nlen := len $natfields | min1}}
 	{{.Name}}Table = `
-	create table if not exists %s.{{ .Table}}({{range $fi, $fld := $natfields}}
-	  {{if .Relation}}{{template "relation" .}}{{else }}{{.Column}} {{.SQLType}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if .Primary }} primary key{{else}}{{if .Unique}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{if .Delete}} on delete {{.Delete}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
+	create table if not exists %[1]s.{{ .Table}}({{range $fi, $fld := $natfields}}
+	  {{if .Relation}}{{template "relation" .}}{{else }}{{.Column}} {{.SQLType}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if .Primary }} primary key{{else}}{{if .Delete}} on delete {{.Delete}}{{end}}{{if .Unique}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
 	  primary key({{range $fii, $ckd := .CompositeKey}}{{if $fii}},{{end}}{{.}}{{end}}){{end}}
 	);`
 {{end}}
@@ -60,11 +60,11 @@ var {{title .Schema}}Schema  = []string{ {{range .Tables}}
 	"{{ .Name}}",{{end}}
 }{{end}}
 {{end}}
-{{define "relation"}}{{.Relation.From}} int references {{.Relation.Table}}({{.Relation.To}}){{if .Relation.NotNull}} not null{{end}}{{if .Delete}} on delete {{.Delete}}{{end}}{{end}}
+{{define "relation"}}{{.Relation.From}} int references %[1]s.{{.Relation.Table}}({{.Relation.To}}){{if .Delete}} on delete {{.Delete}}{{end}}{{if .Relation.NotNull}} not null{{end}}{{end}}
 {{define "setup"}}
 var typeSetup = `
 insert into %s.object_type values {{range $i , $val := .Tokens}}
-	{{if $i}},{{end}}(default, '{{.Name}}', {{.Name}}){{end}};
+	{{if $i}},{{end}}(default, '{{.Name}}', '{{.Name}}'){{end}};
 `
 var actionSetup =`
 insert into %s.object_action values(default, 'Read', 'read object'),

@@ -60,7 +60,7 @@ func checkSqlTimeValue(v interface{}) time.Time {
 //postgresql specific shit
 func {{.Name}}LastInsertID(ctx SQLContext) (int64, error) {
        	var nId int64
-       	if err := ctx.QueryRow(strings.Replace("select currval('[SCHEMA].{{tolower .Name}}_{{tolower .IDColumn}}_seq')", "[SCHEMA]", ctx.Schema(), -1)).Scan(&nId); err != nil {
+       	if err := ctx.QueryRow(strings.Replace("select currval('[SCHEMA].{{tolower .Table}}_{{tolower .IDColumn}}_seq')", "[SCHEMA]", ctx.Schema(), -1)).Scan(&nId); err != nil {
                	return 0, err
        	}
        	return nId, nil
@@ -158,13 +158,13 @@ func (q *{{.Name}}Query) Single(ctx SQLContext) (*{{.Name}}, error) {
 	return Query{{title .Name}}(q.query, q.params, q.depth, ctx)
 }
 
-func Find{{title .Name}}ByID(id int, lvl int, ctx SQLContext) (*{{.Name}}, error) {
+func Find{{title .Name}}ByID(id {{.IDType}}, lvl int, ctx SQLContext) (*{{.Name}}, error) {
         return New{{.Name}}Query(lvl).Where("ID", "=", id).Single(ctx)
 }
 
 {{if not .LinkEntity}}
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
-	if entity.ID == 0 {
+	if entity.ID == {{if eq .IDType "int64"}}0{{else if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}nil{{end}} {
 		return errors.New("Cannot delete without entity identifier")
 	}
 	query := strings.Replace("DELETE FROM [SCHEMA].{{.Table}} WHERE {{.IDColumn}} = $1", "[SCHEMA]", ctx.Schema(), -1)
@@ -303,10 +303,10 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 }
 
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}
-	query := `INSERT INTO [SCHEMA].{{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}} {{$uuid := eq .IDType "uuid.UUID"}}
+query := `INSERT INTO [SCHEMA].{{.Table}} ({{if $uuid}}{{.IDColumn}}, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{if $uuid}}$1, {{end}}{{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{if $uuid}}{{plus2 $idx}}{{else}}{{plus1 $idx}}{{end}}{{end}})`
 	query = strings.Replace(query, "[SCHEMA]", ctx.Schema(), -1)
-	_, err = ctx.Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
+	_, err = ctx.Exec(query, {{if $uuid}}entity.ID, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
 	return
 }
 

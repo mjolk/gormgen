@@ -3,8 +3,8 @@ package {{.PackageName}}
 
 import (
 	"database/sql"
-	"github.com/lib/pq"
-	"github.com/satori/go.uuid"
+	"github.com/lib/pq"{{if ne .Level 0}}
+	"github.com/satori/go.uuid"{{end}}
 	"fmt"
 )
 {{$level := .Level}}

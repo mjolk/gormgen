@@ -81,6 +81,9 @@ var (
 		"plus1": func(x int) int {
 			return x + 1
 		},
+		"plus2": func(x int) int {
+			return x + 2
+		},
 		"min1": func(x int) int {
 			return x - 1
 		}}
@@ -91,7 +94,7 @@ func LookupLink(link string) string {
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf(" references %s(%s)", l.Table, l.IDColumn)
+	return fmt.Sprintf(" references %%[1]s.%s(%s)", l.Table, l.IDColumn)
 }
 
 func TypePrefix(r *relation, baseType string) string {

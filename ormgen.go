@@ -344,6 +344,15 @@ func (s *structToken) RootRelations() []*relation {
 	return res
 }
 
+func (s *structToken) IDType() string {
+	for _, f := range s.Fields {
+		if f.Primary {
+			return f.Type
+		}
+	}
+	return ""
+}
+
 func (r *relation) Root() *relation {
 	previous := r
 	lr := r
