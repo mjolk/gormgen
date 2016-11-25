@@ -19,7 +19,7 @@ var {{.Name}}PropToSql = map[string]string{ {{range .Fields}}
 {{ if .Composite}}
 
 func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
-	return `FROM [SCHEMA].{{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM [SCHEMA].attribute a INNER JOIN [SCHEMA].objecttype o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}[SCHEMA].{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN [SCHEMA].{{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN [SCHEMA].{{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if .IsManyToOne}} LEFT JOIN [SCHEMA].{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
+	return `FROM [SCHEMA].{{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM [SCHEMA].attribute a INNER JOIN [SCHEMA].object_type o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}[SCHEMA].{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN [SCHEMA].{{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN [SCHEMA].{{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if .IsManyToOne}} LEFT JOIN [SCHEMA].{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
 }
 
 func {{.Name}}Select_lvl{{itoa $level}}() string { {{$tok := .}}
@@ -86,14 +86,11 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 					if rel.ID == s.{{.Relation.ProxyFieldName}}.ID {
 						New{{tovar .Relation.FieldName}}ID = false
 						{{typeprefix .Relation ""}}{{.Relation.Type}} = rel
-					} else {
-						{{typeprefix .Relation ""}}{{.Relation.Type}} = new({{.Relation.Type}})
 					}
 				}
-			} else {
-				{{typeprefix .Relation ""}}{{.Relation.Type}} = new({{.Relation.Type}})
-			}
-			if New{{tovar .Relation.FieldName}}ID { {{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}{{$rell := .Relation}}
+			} 
+			if New{{tovar .Relation.FieldName}}ID { 
+				{{typeprefix .Relation ""}}{{.Relation.Type}} = new({{.Relation.Type}}){{$omfiltrd := norel $fields .Relation.ProxyFieldName}}{{$omntpe := .Relation.Type}}{{$rell := .Relation}}
 				{{range $a, $b := $omfiltrd}}{{if $a}}
 				{{end}}{{typeprefix $rell ""}}{{$omntpe}}.{{proxyshift .}} = s.{{.}}{{end}} }{{end}}
 				{{range .Relation.SubRelations .Token.Relations}}{{template "merge" relarg $token . $relation $root}}{{end}}
