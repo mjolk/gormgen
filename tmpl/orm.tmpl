@@ -302,6 +302,24 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
 }
 
+{{if ne .IDType ""}}
+func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
+	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
+		return errors.New("Cannot update without entity identifier")
+	}{{$l := len $natfields}}
+	queryPrts := make([]string, 0)
+	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}
+	updateFields = append(updateFields, entity.{{.Name}})
+	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
+	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
+	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
+	updateFields = append(updateFields, entity.ID)
+	query := strings.Replace(`UPDATE [SCHEMA].{{.Table}} ` + queryStr, "[SCHEMA]", ctx.Schema(), -1)
+	_, err = ctx.Exec(query, updateFields...)
+	return
+}
+{{end}}
+
 
 func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}} {{$uuid := eq .IDType "uuid.UUID"}}
 query := `INSERT INTO [SCHEMA].{{.Table}} ({{if $uuid}}{{.IDColumn}}, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{if $uuid}}$1, {{end}}{{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{if $uuid}}{{plus2 $idx}}{{else}}{{plus1 $idx}}{{end}}{{end}})`

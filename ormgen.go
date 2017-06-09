@@ -15,12 +15,14 @@ import (
 
 const (
 	usageText = `ORMGEN
-    Generate Go code to convert database rows into arbitrary structs.
-
+    Generate Go code to access sql database, create config files in
+    store/[schema]/
 USAGE
     ormgen [options] paths...
 
 OPTIONS
+    -l 
+       Set the depth to which relations can be fetched
     -o, -output
         Set the name of the generated file. Default is scans.go.
 
@@ -42,26 +44,8 @@ OPTIONS
         Print help and exit.
 
 EXAMPLES
-    tables.go is a file that contains one or more struct declarations.
-
-    Generate scan functions based on structs in tables.go.
-        scaneo tables.go
-
-    Generate scan functions and name the output file funcs.go
-        scaneo -o funcs.go tables.go
-
-    Generate scans.go with unexported functions.
-        scaneo -u tables.go
-
-    Generate scans.go with only struct Post and struct user.
-        scaneo -w "Post,user" tables.go
 
 NOTES
-    Struct field names don't have to match database column names at all.
-    However, the order of the types must match.
-
-    Integrate this with go generate by adding this line to the top of your
-    tables.go file.
         //go:generate ormgen $GOFILE
 `
 	//COLUMN col
@@ -114,6 +98,7 @@ type structToken struct {
 	LinkEntity   bool
 	CompositeKey []string `json:"compositeKey"`
 	Schema       string
+	Query        bool
 }
 
 type context struct {
@@ -270,7 +255,7 @@ func main() {
 		structToks = loadSource(flag.Args(), *whitelist)
 	}
 
-	generate(inputLevel, structToks, "tmpl/orminit.tmpl", "init")
+	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
 	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
 	generate(inputLevel, structToks, "tmpl/ormentity.tmpl", "entity")
 
@@ -347,6 +332,8 @@ func (s *structToken) RootRelations() []*relation {
 func (s *structToken) IDType() string {
 	for _, f := range s.Fields {
 		if f.Primary {
+			return f.Type
+		} else if f.Name == "ID" {
 			return f.Type
 		}
 	}
@@ -512,7 +499,11 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		if embeddedStruct == "" {
 			if ctx != nil && ctx.IsLink {
 				if strings.Contains(field.Name, "ID") {
-					continue
+					if field.Name == "ID" {
+						name = baseName + ".LinkID"
+					} else {
+						continue
+					}
 				}
 			}
 			nf := &fieldToken{

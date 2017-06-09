@@ -89,6 +89,17 @@ var (
 		}}
 )
 
+func filterQueries(toks []*structToken) []*structToken {
+	filtered := make([]*structToken, 0)
+	for _, tok := range toks {
+		if tok.Query {
+			continue
+		}
+		filtered = append(filtered, tok)
+	}
+	return filtered
+}
+
 func LookupLink(link string) string {
 	l, ok := structLookup[link]
 	if !ok {

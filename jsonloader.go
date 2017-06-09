@@ -33,7 +33,7 @@ func indexObjects(objects *[]*structToken) error {
 	obs := *objects
 	index, err := loadIndex()
 	if err != nil {
-		return nil
+		return err
 	}
 	for i, name := range index {
 		for _, obj := range obs {
@@ -114,6 +114,5 @@ func loadJSON() ([]*structToken, error) {
 		return nil, err
 	}
 	sort.Sort(ByIndex(structToks))
-
 	return structToks, nil
 }

@@ -81,8 +81,8 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 {{$token := .Token}}{{$relation := .Relation}}{{$root := .RootRelation}}{{$fields:= .Token.Fields}}{{$relations := .Token.Relations}}{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}New{{tovar .Relation.FieldName}}ID := true
 		if s.{{.Relation.ProxyFieldName}}.ID != 0 { {{$parentlist := listfields .ParentRelation}}
 			var {{typeprefix .Relation ""}}{{.Relation.Type}} *{{.Relation.Type}}
-			if len({{if checkparent .ParentRelation}}{{typeprefix .Relation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}) > 0 {
-				for _, rel := range {{if checkparent .ParentRelation}}{{typeprefix .Relation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} {
+			if len({{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}) > 0 {
+				for _, rel := range {{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} {
 					if rel.ID == s.{{.Relation.ProxyFieldName}}.ID {
 						New{{tovar .Relation.FieldName}}ID = false
 						{{typeprefix .Relation ""}}{{.Relation.Type}} = rel
@@ -94,7 +94,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 				{{range $a, $b := $omfiltrd}}{{if $a}}
 				{{end}}{{typeprefix $rell ""}}{{$omntpe}}.{{proxyshift .}} = s.{{.}}{{end}} }{{end}}
 				{{range .Relation.SubRelations .Token.Relations}}{{template "merge" relarg $token . $relation $root}}{{end}}
-				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}if New{{tovar .Relation.FieldName}}ID { {{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}{{typeprefix .Relation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}{{typeprefix .Relation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{else}}
+				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}if New{{tovar .Relation.FieldName}}ID { {{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{else}}
 				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{end}}
 		}{{end}}
 {{end}}
