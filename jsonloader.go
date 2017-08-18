@@ -66,6 +66,7 @@ func loadFile(file string, cfgCh chan<- []*structToken, errCh chan<- error) {
 		errCh <- fmt.Errorf("%s \nfor file: %s\n", err, file)
 		return
 	}
+
 	prts := strings.Split(file, "/")
 	for i := range cts {
 		cts[i].Schema = prts[0]

@@ -49,7 +49,7 @@ var {{title .Schema}}Schema  = []string{ {{range .Tables}}
 	"{{ .Name}}",{{end}}
 }{{end}}
 {{end}}
-{{define "relation"}}{{.Relation.From}} int references %[1]s.{{.Relation.Table}}({{.Relation.To}}){{if .Delete}} on delete {{.Delete}}{{end}}{{if .Relation.NotNull}} not null{{end}}{{end}}
+{{define "relation"}}{{.Relation.From}} {{.Relation.SQLType}} references %[1]s.{{.Relation.Table}}({{.Relation.To}}){{if .Delete}} on delete {{.Delete}}{{end}}{{if .Relation.NotNull}} not null{{end}}{{end}}
 {{define "setup"}}
 var typeSetup = `
 insert into %s.object_type values {{range $i , $val := .Tokens}}
