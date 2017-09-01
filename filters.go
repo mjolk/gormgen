@@ -46,38 +46,41 @@ var (
 			}
 			return false
 		},
-		"typeprefix":        TypePrefix,
-		"reproxyfy":         Reproxyfy,
-		"tolower":           strings.ToLower,
-		"linkprops":         LinkPropertiesFor,
-		"linkrels":          LinkRelationsFor,
-		"itoa":              strconv.Itoa,
-		"structtok":         FindStructToken,
-		"proxysubrels":      ProxyLinkRelations,
-		"proxyshift":        FieldProxyShift,
-		"listfields":        Fields,
-		"checkparent":       CheckParent,
-		"norel":             FilterRelations,
-		"tovar":             FieldToVariableName,
-		"relarg":            RelationLevel,
-		"schemarg":          Schemarg,
-		"switch2fk":         SwitchToFK,
-		"ffiltersliceandid": FilterSliceAndID,
-		"ffilterslice":      FilterSlice,
-		"updatealias":       UpdateAlias2,
-		"ffilternatid":      FilterNonNativeFieldsAndIDs,
-		"ffilterid":         FilterFieldsAndIDs,
-		"field":             FieldOnly,
-		"fieldshift":        FieldShift,
-		"proxy":             ProxyType,
-		"ffilter":           FilterFields,
-		"native":            OnlyNativeField,
-		"attributealias":    AttributeAlias,
-		"ffilterforids":     OnlyIDFields,
-		"isreference":       FieldIsReference,
-		"referenceonly":     ReferenceOnly,
-		"deproxyfy":         DeProxyfyFieldName,
-		"lookuplink":        LookupLink,
+		"typeprefix":         TypePrefix,
+		"reproxyfy":          Reproxyfy,
+		"tolower":            strings.ToLower,
+		"linkprops":          LinkPropertiesFor,
+		"linkrels":           LinkRelationsFor,
+		"itoa":               strconv.Itoa,
+		"structtok":          FindStructToken,
+		"proxysubrels":       ProxyLinkRelations,
+		"proxyshift":         FieldProxyShift,
+		"ffiltersliceandids": FilterSliceAndIDs,
+		"isobjectfield":      IsObjectField,
+		"listfields":         Fields,
+		"checkparent":        CheckParent,
+		"norel":              FilterRelations,
+		"tovar":              FieldToVariableName,
+		"relarg":             RelationLevel,
+		"schemarg":           Schemarg,
+		"switch2fk":          SwitchToFK,
+		"ffiltersliceandid":  FilterSliceAndID,
+		"ffilterslice":       FilterSlice,
+		"updatealias":        UpdateAlias2,
+		"ffilternatid":       FilterNonNativeFieldsAndIDs,
+		"ffilterid":          FilterFieldsAndIDs,
+		"field":              FieldOnly,
+		"fieldshift":         FieldShift,
+		"proxy":              ProxyType,
+		"ffilter":            FilterFields,
+		"native":             OnlyNativeField,
+		"attributealias":     AttributeAlias,
+		"ffilterforids":      OnlyIDFields,
+		"isreference":        FieldIsReference,
+		"referenceonly":      ReferenceOnly,
+		"deproxyfy":          DeProxyfyFieldName,
+		"lookuplink":         LookupLink,
+		"lookupidtype":       LookupIDType,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -89,6 +92,27 @@ var (
 		}}
 )
 
+func IsObjectField(field *fieldToken) bool {
+	if strings.Contains(field.Type, "*") {
+		return true
+	}
+	return false
+}
+
+func FilterSliceAndIDs(fields []*fieldToken) []*fieldToken {
+	filtered := make([]*fieldToken, 0)
+	for _, field := range fields {
+		if strings.Contains(field.Name, "ID") ||
+			strings.Contains(field.Type, "[]*") ||
+			strings.Contains(field.Type, "[]") ||
+			field.Type == "Entity" {
+			continue
+		}
+		filtered = append(filtered, field)
+	}
+	return filtered
+}
+
 func filterQueries(toks []*structToken) []*structToken {
 	filtered := make([]*structToken, 0)
 	for _, tok := range toks {
@@ -98,6 +122,20 @@ func filterQueries(toks []*structToken) []*structToken {
 		filtered = append(filtered, tok)
 	}
 	return filtered
+}
+
+func LookupIDType(e string) string {
+	entity := strings.TrimPrefix(e, "*")
+	l, ok := structLookup[entity]
+	if !ok {
+		panic("fatal error")
+	}
+	for _, field := range l.Fields {
+		if field.Name == "ID" {
+			return field.Type
+		}
+	}
+	return "int64"
 }
 
 func LookupLink(link string) string {

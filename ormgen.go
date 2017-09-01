@@ -255,6 +255,7 @@ func main() {
 		structToks = loadSource(flag.Args(), *whitelist)
 	}
 
+	generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
 	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
 	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
 	generate(inputLevel, structToks, "tmpl/ormentity.tmpl", "entity")
@@ -301,6 +302,7 @@ func generate(mLevel int, data []*structToken, tmpl, tmplName string) {
 
 	switch tmplName {
 	case "entity":
+	case "changeset":
 	default:
 		data = generateMetadata(data)
 	}
