@@ -5,16 +5,28 @@ import (
 	"time"
 	"strconv"
 	"github.com/satori/go.uuid"
+	"fmt"
 )
 
-{{range .Tokens}}{{$fields := ffiltersliceandids .Fields}}
+{{range .Tokens}}{{$fields := ffiltersliceandids .Fields}}{{$curname := .Name}}
+{{range $fields}}{{if eq .Name "Version"}}
+func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
+	update.Version++
+	if e.Version >= update.Version {
+		return fmt.Errorf("version mismatch, object already newer version")
+	}
+	e.Version = update.Version
+	e.Updated = time.Now()
+	return nil
+}
+{{end}}{{end}}
 func (e *{{.Name}}) ChangeSet(
 	update *{{.Name}},
-	tpe *ObjectType,
 	login *Login,
 	buffer chan<- ObjectEvent,
-	) bool { 
-	changed := false{{range $fields}}{{$objectfield := isobjectfield .}}
+	) bool {
+	tpe := GetObjectType("{{$curname}}")
+	changed := false{{range $fields}}{{if ne .Name "Version"}}{{$objectfield := isobjectfield .}}
 {{if isuuid .Type}}
 if !uuid.Equal(e.{{.Name}}, update.{{.Name}}) {
 {{else if $objectfield }}{{if isuuid (lookupidtype .Type)}}
@@ -39,6 +51,7 @@ buffer <- ObjectEvent{
 	e.{{.Name}} = update.{{.Name}}
 	changed = true
 }
+{{end}}
 {{end}}
 return changed
 }
