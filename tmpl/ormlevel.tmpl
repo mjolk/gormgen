@@ -4,7 +4,7 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"{{if ne .Level 0}}
-	"github.com/satori/go.uuid"{{end}}
+	"bitbucket.org/astrotit/registration-api/uuid"{{end}}
 	"fmt"
 )
 {{$level := .Level}}

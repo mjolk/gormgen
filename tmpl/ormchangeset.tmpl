@@ -4,12 +4,10 @@ package {{.PackageName}}
 import (
 	"time"
 	"strconv"
-	"github.com/satori/go.uuid"
+	"bitbucket.org/astrotit/registration-api/uuid"
 	"fmt"
-	pb "github.com/golang/protobuf/ptypes"
 )
 
-{{$proto := eq $.Etype "proto"}}
 {{range .Tokens}}{{$fields := ffiltersliceandids .Fields}}{{$curname := .Name}}
 {{range $fields}}{{if eq .Name "Version"}}
 func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
@@ -17,9 +15,8 @@ func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
 	if e.Version >= update.Version {
 		return fmt.Errorf("version mismatch, object already newer version")
 	}
-	e.Version = update.Version {{if $proto}}
-	e.Updated = pb.TimestampNow() {{else}}
-	e.Updated = time.Now() {{end}}
+	e.Version = update.Version
+	e.Updated = time.Now()
 	return nil
 }
 {{end}}{{end}}
@@ -29,22 +26,15 @@ func (e *{{.Name}}) ChangeSet(
 	buffer chan<- ObjectEvent,
 	) bool {
 	tpe := GetObjectType("{{$curname}}")
-	changed := false{{range $fields}}{{if ne .Name "Version"}}{{if not $proto}}{{$objectfield := isobjectfield .}}
+	changed := false{{range $fields}}{{if ne .Name "Version"}}{{$objectfield := isobjectfield .}}
 {{if isuuid .Type}}
 if !uuid.Equal(e.{{.Name}}, update.{{.Name}}) {
 {{else if $objectfield }}{{if isuuid (lookupidtype .Type)}}
 if !uuid.Equal(e.{{.Name}}.ID, update.{{.Name}}.ID) { {{else}}
 if e.{{.Name}}.ID != update.{{.Name}}.ID { {{end}}
-{{else if istime .Type}}
-if !e.{{.Name}}.Equal(update.{{.Name}}) {
 {{else}}
 if e.{{.Name}} != update.{{.Name}} {
 {{end}}
-{{ else }}{{$objectfield := isobjectfield .}}
-{{ if $objectfield }}
-if e.{{.Name}}.ID != update.{{.Name}}.ID { {{else if istime .Type}}
-if e.{{.Name}}.GetSeconds() != update.{{.Name}}.GetSeconds() { {{else}}
-if e.{{.Name}} != update.{{.Name}} { {{end}}{{end}}{{if not $proto}}
 buffer <- ObjectEvent{
 		Type: tpe,
 		Action: UPDATE,
@@ -55,30 +45,12 @@ buffer <- ObjectEvent{
 		NewValue: update.{{.Name}}.String(),{{else if isobjectfield .}}{{$type := lookupidtype .Type}}
 		OldValue: {{if isuuid $type}}e.{{.Name}}.ID.String(),{{else}}strconv.FormatInt(e.{{.Name}}.ID, 10),{{end}}
 		NewValue: {{if isuuid $type}}update.{{.Name}}.ID.String(),{{else}}strconv.FormatInt(update.{{.Name}}.ID, 10),{{end}}{{else}}
-		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}e.{{.Name}}.Format(time.UnixDate),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else}}e.{{.Name}},{{end}}
-		NewValue:{{if isint .Type}}strconv.FormatInt(update.{{.Name}}, 10),{{else if istime .Type}}update.{{.Name}}.Format(time.UnixDate),{{else if isbool .Type}}strconv.FormatBool(update.{{.Name}}),{{else}}update.{{.Name}},{{end}}{{end}}
+		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(e.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else}}e.{{.Name}},{{end}}
+		NewValue:{{if isint .Type}}strconv.FormatInt(update.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(update.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(update.{{.Name}}),{{else}}update.{{.Name}},{{end}}{{end}}
 	}
 	e.{{.Name}} = update.{{.Name}}
 	changed = true
 }
-{{else}}
-buffer <- ObjectEvent{
-		Type: tpe,
-		Action: UPDATE,
-		Login: login,
-		Created: pb.TimestampNow(),
-		PropertyName: "{{.Name}}", {{if isobjectfield .}}{{$type := lookupidtype .Type}}{{if isstring $type}}
-		OldValue: e.{{.Name}},
-		NewValue: update.{{.Name}} {{else}}
-		OldValue: strconv.FormatInt(e.{{.Name}}.ID, 10),
-		NewValue: strconv.FormatInt(update.{{.Name}}.ID, 10),{{end}}{{end}}
-		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}pb.TimestampString(e.{{.Name}}),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else}}e.{{.Name}},{{end}}
-		NewValue:{{if isint .Type}}strconv.FormatInt(update.{{.Name}}, 10),{{else if istime .Type}}pb.TimestampString(update.{{.Name}}),{{else if isbool .Type}}strconv.FormatBool(update.{{.Name}}),{{else}}update.{{.Name}},{{end}}
-	}
-	e.{{.Name}} = update.{{.Name}}
-	changed = true
-}
-{{end}}
 {{end}}
 {{end}}
 return changed

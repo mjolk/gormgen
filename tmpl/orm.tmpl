@@ -4,30 +4,20 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"
-	"github.com/satori/go.uuid"
+	"bitbucket.org/astrotit/registration-api/uuid"
 	"errors"
 	"strings"
 	"time"
-	"fmt" {{ if eq $.Etype "proto"}}
-	pb "github.com/golang/protobuf/ptypes" {{end}}
+	"fmt"
 )
-{{if eq $.Etype "go"}}
+
 func checkSqlUUIDValue(v interface{}) uuid.UUID {
 	val := v.(*uuid.NullUUID)
 	if !val.Valid{
 		return uuid.UUID{}	
 	}
 	return val.UUID
-}
-{{ else }}
-func checkSqlUUIDValue(v interface{}) string {
-	val := v.(*uuid.NullUUID)
-	if !val.Valid{
-		return ""	
-	}
-	return val.UUID.String()
-}
-{{end}}
+} 
 
 func checkSqlInt64Value(v interface{}) int64 {
 	val := v.(*sql.NullInt64)
@@ -53,21 +43,13 @@ func checkSqlBoolValue(v interface{}) bool {
 	return val.Bool
 }
 
-{{if eq $.Etype "go"}}
 func checkSqlTimeValue(v interface{}) time.Time {
 	val := v.(*pq.NullTime)
 	if !val.Valid {
 		return time.Time{}
 	}
 	return val.Time
-}{{else}}
-func checkSqlTimeValue(v interface{}) pb.Timestamp {
-	val := v.(*pq.NullTime)
-	if !val.Valid {
-		return pb.TimestampProto(time.Time{})
-	}
-	return pb.TimestampProto(val.Time)
-}{{end}}
+}
 
 {{$level := .Level}}
 {{$levels := .Levels}}
@@ -243,73 +225,72 @@ func {{.Name}}From(lvl int) string {
 }
 
 
-{{$proto := eq $.Etype "proto"}}
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) error { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
+
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
 	var query string
 	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
 	if entity.{{referenceonly .Name}} == nil {
 		values = append(values, nil)
 	} else {
 		values = append(values, entity.{{.Name}})
-	}{{else}}{{if and (isuuid .Type) $proto}}
-	value, err := uuid.FromString(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	values = append(values, value) {{ else if and (istime .Type) $proto }}
-	value, err := pb.Timestamp(entity.{{.Name}})
-	if err != nil {
-		return derr
-	}
-	values = append(values, value){{ else }}
-	values = append(values, entity.{{.Name}}){{end}}{{end}}{{end}}
+	}{{else}}
+	values = append(values, entity.{{.Name}}){{end}}{{end}}
 	if len(values) == 0 {
 		query = `INSERT INTO [SCHEMA].{{.Table}} DEFAULT VALUES`
 	} else {
 		query = `INSERT INTO [SCHEMA].{{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
 	}
 	query = strings.Replace(query, "[SCHEMA]", ctx.Schema(), -1)
-	_, err := ctx.Exec(query, values...)
+	_, err = ctx.Exec(query, values...)
+	/*
+	{{$fields:=.Fields}}{{range .RootRelations}}{{if .IsOneToMany}}
+	if len(entity.{{.FieldName}}) > 0 {
+		for _, rel := range entity.{{.Field}} {
+			err = Insert{{.Type}}(rel, tx)
+			if err != nil {
+				return
+			}
+		}
+	}{{end}}{{if .IsManyToMany}}
+	if len(entity.{{.Field}}) > 0 {
+		for _, rel := range entity.{{.Field}} { {{$natffields := ffilter $sfields .Field}}{{$linktpe := .LinkType}}{{$tolinktpe := .Type}}
+			linkEntity := new({{.LinkType}}){{range .SubRelations $relations}}{{if .LinkRelation}}
+			linkEntity.{{.Field}} = new({{.Type}}){{end}}{{end}}
+		 	linkEntity.{{$owner}}ID = entity.ID
+			linkEntity.{{$tolinktpe}}ID = rel.ID {{range $natffields}}{{if .IsLinkField}}
+			linkEntity.{{fieldshift .Name}} = rel.{{fieldshift .Name}}{{end}}{{end}}{{range .SubRelations $relations}}{{if .LinkRelation}}
+			linkEntity.{{.Type}}.ID = rel.{{.Type}}.ID{{end}}{{end}}
+			err = Insert{{.LinkType}}(linkEntity, tx)
+			if err != nil {
+				return
+			}
+		}
+	}{{end}}{{end}}*/
 	return
 }
 
-func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) error { {{$natfields := ffiltersliceandid .Fields}}
-if entity.ID == {{if $proto}}{{if isuuid .IDType}}""{{else}}0{{end}}{{else}}{{if isuuid .IDType}}uuid.Nil{{else}}0{{end}}{{end}} {
+func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
+	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
 		return errors.New("Cannot update without entity identifier")
 	}{{$l := len $natfields}}
 	queryPrts := make([]string, 0)
 	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if isreference .}}
-	if entity.{{referenceonly .Name}} == nil || entity.{{.Name}} == {{if $proto}}{{if isuuid .Type}}""{{else}}0{{end}}{{else}}{{if isuuid .Type}}uuid.Nil{{else}}0{{end}}{{end}} {
+	if entity.{{referenceonly .Name}} == nil || entity.{{.Name}} == {{if eq .Type "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
 		updateFields = append(updateFields, nil)
 	} else {
 		updateFields = append(updateFields, entity.{{.Name}})
-	}{{else}}{{if and (isuuid .Type) $proto}}
-	value, err := uuid.FromString(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else if and (istime .Type) $proto }}
-	value, err := pb.Timestamp(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else }}
-	updateFields = append(updateFields, entity.{{.Name}}){{end}}{{end}}
+	}{{else}}
+	updateFields = append(updateFields, entity.{{.Name}}){{end}}
 	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
 	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
-	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", ")){{if and (isuuid .IDType) $proto}}
-	id, err := uuid.FromString(entity.ID)
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, id) {{ else }}
-	updateFields = append(updateFields, entity.ID){{end}}
+	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
+	updateFields = append(updateFields, entity.ID)
 	query := strings.Replace(`UPDATE [SCHEMA].{{.Table}} ` + queryStr, "[SCHEMA]", ctx.Schema(), -1)
-	_, err := ctx.Exec(query, updateFields...)
+	_, err = ctx.Exec(query, updateFields...)
 	return
 }
 {{else}}
-{{$proto := eq $.Etype "proto"}}
+
 func {{.Name}}From(lvl int) string { {{$basetpe := .Name}}
 	return `FROM [SCHEMA].{{.Table}} {{.Alias}}`
 }
@@ -319,61 +300,28 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 }
 
 {{if ne .IDType ""}}
-func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) error { {{$natfields := ffiltersliceandid .Fields}}
-	if entity.ID == {{if $proto}}{{if isuuid .IDType}}""{{else}}0{{end}}{{else}}{{if isuuid .IDType}}uuid.Nil{{else}}0{{end}}{{end}} {
+func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
+	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
 		return errors.New("Cannot update without entity identifier")
 	}{{$l := len $natfields}}
 	queryPrts := make([]string, 0)
-	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if and (isuuid .Type) $proto}}
-	value, err := uuid.FromString(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else if and (istime .Type) $proto }}
-	value, err := pb.Timestamp(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else }}
-	updateFields = append(updateFields, entity.{{.Name}}){{end}}
+	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}
+	updateFields = append(updateFields, entity.{{.Name}})
 	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
 	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
-	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", ")){{if and (isuuid .IDType) $proto}}
-	id, err := uuid.FromString(entity.ID)
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, id) {{ else }}
-	updateFields = append(updateFields, entity.ID){{end}}
+	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
+	updateFields = append(updateFields, entity.ID)
 	query := strings.Replace(`UPDATE [SCHEMA].{{.Table}} ` + queryStr, "[SCHEMA]", ctx.Schema(), -1)
-	_, err := ctx.Exec(query, updateFields...)
+	_, err = ctx.Exec(query, updateFields...)
 	return
 }
 {{end}}
 
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) error { {{$natfields := ffilternatid .Fields}} {{$uuid := eq .IDType "uuid.UUID"}}
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}} {{$uuid := eq .IDType "uuid.UUID"}}
 query := `INSERT INTO [SCHEMA].{{.Table}} ({{if $uuid}}{{.IDColumn}}, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{if $uuid}}$1, {{end}}{{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{if $uuid}}{{plus2 $idx}}{{else}}{{plus1 $idx}}{{end}}{{end}})`
 	query = strings.Replace(query, "[SCHEMA]", ctx.Schema(), -1)
-	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if and (isuuid .Type) $proto}}
-	value, err := uuid.FromString(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else if and (istime .Type) $proto }}
-	value, err := pb.Timestamp(entity.{{.Name}})
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, value){{ else }}
-	updateFields = append(updateFields, entity.{{.Name}}){{end}}{{end}}{{if and (isuuid .IDType) $proto}}
-	id, err := uuid.FromString(entity.ID)
-	if err != nil {
-		return err
-	}
-	updateFields = append(updateFields, id) {{ else }}
-	updateFields = append(updateFields, entity.ID){{end}}
-	_, err := ctx.Exec(query, updateFields...)
+	_, err = ctx.Exec(query, {{if $uuid}}entity.ID, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
 	return
 }
 
