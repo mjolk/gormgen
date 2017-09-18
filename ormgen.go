@@ -23,6 +23,11 @@ USAGE
 OPTIONS
     -l 
        Set the depth to which relations can be fetched
+
+    -t 
+       Select entity type output: protobuf or regular go structs,
+       pass either 'go' for regular structs or 'proto' for protobuf
+
     -o, -output
         Set the name of the generated file. Default is scans.go.
 
@@ -83,6 +88,7 @@ type fieldToken struct {
 	Unique      bool   `json:"unique"`
 	Default     string `json:"default"`
 	Delete      string `json:"delete"`
+	IsInterface bool   `json:"interface"`
 	JSON        string `json:"json"`
 }
 
@@ -193,6 +199,7 @@ var (
 	baseFileName  string
 	packageName   string
 	unExport      bool
+	etype         = "go"
 )
 
 func main() {
@@ -206,7 +213,9 @@ func main() {
 	whitelist := flag.String("w", "", "")
 	version := flag.Bool("v", false, "")
 	help := flag.Bool("h", false, "")
+	otype := flag.String("t", "go", "entity type")
 	flag.IntVar(max, "level", 3, "max recursion level")
+	flag.StringVar(otype, "etype", "go", "")
 	flag.StringVar(outFilename, "output", "ormgen", "")
 	flag.StringVar(packName, "package", "current directory", "")
 	flag.BoolVar(unexport, "unexport", false, "")
@@ -243,6 +252,8 @@ func main() {
 		packageName = *packName
 	}
 
+	etype = *otype
+
 	var structToks []*structToken
 	var err error
 
@@ -258,7 +269,11 @@ func main() {
 	generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
 	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
 	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
-	generate(inputLevel, structToks, "tmpl/ormentity.tmpl", "entity")
+	if etype == "go" {
+		generate(inputLevel, structToks, "tmpl/ormentity.tmpl", "entity")
+	} else {
+		generate(inputLevel, structToks, "tmpl/ormproto.tmpl", "proto")
+	}
 
 	for i := 0; i <= inputLevel; i++ {
 		generate(i, structToks, "tmpl/ormlevel.tmpl", "level")
@@ -297,12 +312,17 @@ func generateMetadata(src []*structToken) []*structToken {
 
 func generate(mLevel int, data []*structToken, tmpl, tmplName string) {
 	maxLevel = mLevel
+	ext := "go"
 
-	fileName := fmt.Sprintf("%s_%s_%d.go", baseFileName, tmplName, mLevel)
+	if tmplName == "proto" {
+		ext = "proto"
+	}
+	fileName := fmt.Sprintf("%s_%s_%d.%s", baseFileName, tmplName, mLevel, ext)
 
 	switch tmplName {
 	case "entity":
 	case "changeset":
+	case "proto":
 	default:
 		data = generateMetadata(data)
 	}
@@ -746,6 +766,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Level       int
 		Levels      []int
 		AtMaxLevel  bool
+		Etype       string
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
@@ -753,6 +774,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Level:       lvl,
 		Levels:      make([]int, lvl+1),
 		AtMaxLevel:  lvl == inputLevel,
+		Etype:       etype,
 	}
 
 	if unExport {

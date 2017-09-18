@@ -81,6 +81,9 @@ var (
 		"deproxyfy":          DeProxyfyFieldName,
 		"lookuplink":         LookupLink,
 		"lookupidtype":       LookupIDType,
+		"nopointer":          RemovePointer,
+		"torepeat":           SliceToRepeat,
+		"isidfield":          IsIDField,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -91,6 +94,19 @@ var (
 			return x - 1
 		}}
 )
+
+func IsIDField(name string) bool {
+	return strings.Contains(name, "ID")
+}
+
+func SliceToRepeat(tpe string) string {
+	ret := strings.Replace(tpe, "[]", "repeated ", -1)
+	return strings.Replace(ret, "*", "", -1)
+}
+
+func RemovePointer(tpe string) string {
+	return strings.TrimPrefix(tpe, "*")
+}
 
 func IsObjectField(field *fieldToken) bool {
 	if strings.Contains(field.Type, "*") {
