@@ -246,7 +246,7 @@ func LinkRelationsFor(tpe string) []*relation {
 	relsFound := make(map[string]int, 0)
 	addRelations := make([]*relation, 0)
 	for _, tk := range newStructToks {
-		for _, relts := range tk.Relations {
+		for _, relts := range tk.relations {
 			if relts.LinkRelation {
 				if strings.Contains(relts.FieldName, relLookup) {
 					rlPrts := strings.Split(relts.FieldName, ".")
@@ -274,10 +274,10 @@ func FindStructToken(tpe string) *structToken {
 func ProxyLinkRelations(tpe string) []*relation {
 	fts := make([]*relation, 0)
 	for _, tok := range newStructToks {
-		for _, rel := range tok.Relations {
+		for _, rel := range tok.relations {
 			if rel.IsManyToMany() {
 				if rel.Type == tpe {
-					for _, crel := range rel.SubRelations(tok.Relations) {
+					for _, crel := range rel.SubRelations(tok.relations) {
 						if crel.LinkRelation {
 							dup := false
 							for _, lrel := range fts {
@@ -470,7 +470,7 @@ func UpdateAlias2(tok *structToken, field *fieldToken, alias string) string {
 	fldPrtsLen := len(fldPrts)
 	if fldPrtsLen > 1 {
 		lookup := strings.Join(fldPrts[:fldPrtsLen-1], ".")
-		for _, rel := range tok.Relations {
+		for _, rel := range tok.relations {
 			if lookup == rel.ProxyFieldName {
 				if field.IsLinkField {
 					return rel.LinkAlias
@@ -491,7 +491,7 @@ func UpdateAlias(tok *structToken, field, alias string) string {
 	prts := strings.Split(field, ".")
 	lookup := strings.TrimPrefix(prts[0], "proxy")
 	var result string
-	if result = lookUpAlias(tok.Relations, lookup, prts); result != "" {
+	if result = lookUpAlias(tok.relations, lookup, prts); result != "" {
 		return result
 	}
 	return alias

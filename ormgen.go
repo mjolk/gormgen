@@ -89,6 +89,7 @@ type fieldToken struct {
 	Default     string `json:"default"`
 	Delete      string `json:"delete"`
 	IsInterface bool   `json:"interface"`
+	Lazy        bool   `json:"lazy"`
 	JSON        string `json:"json"`
 }
 
@@ -98,7 +99,7 @@ type structToken struct {
 	Name         string        `json:"name"`
 	Fields       []*fieldToken `json:"fields"`
 	Composite    bool
-	Relations    []*relation
+	relations    []*relation
 	Table        string `json:"table"`
 	Alias        string `json:"alias"`
 	LinkEntity   bool
@@ -150,6 +151,7 @@ type relation struct {
 	Unique         bool
 	Default        string
 	Delete         string
+	Lazy           bool
 	JSON           string
 }
 
@@ -341,9 +343,17 @@ func printRelationTree(sep string, rel *relation, rels []*relation) {
 	}
 }
 
+func (s *structToken) Relations() []*relation {
+	return s.relations
+}
+
+func (s *structToken) EagerRelations() []*relation {
+	return s.relations
+}
+
 func (s *structToken) RootRelations() []*relation {
 	res := make([]*relation, 0)
-	for _, rel := range s.Relations {
+	for _, rel := range s.relations {
 		if rel.ParentRelation == nil {
 			res = append(res, rel)
 		}
@@ -462,7 +472,7 @@ func proxyfyPath(path string, rels []*relation) string {
 }
 
 func proxyfy(src *structToken) {
-	for s, rel := range src.Relations {
+	for s, rel := range src.relations {
 		if rel.IsManyToMany() || rel.IsOneToMany() {
 			for _, field := range src.Fields {
 				prts := strings.Split(field.Name, ".")
@@ -480,10 +490,10 @@ func proxyfy(src *structToken) {
 				field.Name = strings.Join(prts, ".")
 			}
 		}
-		src.Relations[s].ProxyFieldName = proxyfyPath(src.Relations[s].FieldName, src.Relations)
-		proxyPrts := strings.Split(src.Relations[s].ProxyFieldName, ".")
+		src.relations[s].ProxyFieldName = proxyfyPath(src.relations[s].FieldName, src.relations)
+		proxyPrts := strings.Split(src.relations[s].ProxyFieldName, ".")
 		if strings.HasPrefix(proxyPrts[len(proxyPrts)-1], "proxy") {
-			src.Relations[s].Proxy = true
+			src.relations[s].Proxy = true
 		}
 	}
 }
@@ -544,6 +554,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				Unique:   field.Unique,
 				Default:  field.Default,
 				Delete:   field.Delete,
+				Lazy:     field.Lazy,
 				JSON:     field.JSON,
 			}
 			if field.Name == "ID" && ctx != nil {
@@ -584,6 +595,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			Unique:      field.Unique,
 			Default:     field.Default,
 			Delete:      field.Delete,
+			Lazy:        field.Lazy,
 			JSON:        field.JSON,
 		}
 		if pRel != nil {
@@ -617,21 +629,21 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				rel.TargetType = emb.Name
 				rel.LinkTable = linkStruct.Table
 				lnCtx.LinkAlias = field.LinkAlias
-				res.Relations = append(res.Relations, rel)
+				res.relations = append(res.relations, rel)
 				parse(res, linkStruct, rel, lnCtx)
 			} else { //onetomany
 				//log.Printf("adding [[ONETOMANY]]: %s \n", field.Name)
 				rel.From = src.IDColumn
 				rel.To = fk
 				rel.RelationType = ONETOMANY
-				res.Relations = append(res.Relations, rel)
+				res.relations = append(res.relations, rel)
 			}
 		} else { // manytoone
 			//log.Printf("adding [[MANYTOONE]]: %s \n", field.Name)
 			rel.From = fk
 			rel.To = emb.IDColumn
 			rel.RelationType = MANYTOONE
-			res.Relations = append(res.Relations, rel)
+			res.relations = append(res.relations, rel)
 		}
 		parse(res, emb, rel, nCtx)
 	}
@@ -640,8 +652,8 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 var aliases map[string]int
 
 func checkDuplicateAlias(s *structToken) {
-	aliases = make(map[string]int, len(s.Relations)+10)
-	checkAlias(s.Relations)
+	aliases = make(map[string]int, len(s.relations)+10)
+	checkAlias(s.relations)
 }
 
 func checkAlias(rels []*relation) {
