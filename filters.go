@@ -46,44 +46,45 @@ var (
 			}
 			return false
 		},
-		"typeprefix":         TypePrefix,
-		"reproxyfy":          Reproxyfy,
-		"tolower":            strings.ToLower,
-		"linkprops":          LinkPropertiesFor,
-		"linkrels":           LinkRelationsFor,
-		"itoa":               strconv.Itoa,
-		"structtok":          FindStructToken,
-		"proxysubrels":       ProxyLinkRelations,
-		"proxyshift":         FieldProxyShift,
-		"ffiltersliceandids": FilterSliceAndIDs,
-		"isobjectfield":      IsObjectField,
-		"listfields":         Fields,
-		"checkparent":        CheckParent,
-		"norel":              FilterRelations,
-		"tovar":              FieldToVariableName,
-		"relarg":             RelationLevel,
-		"schemarg":           Schemarg,
-		"switch2fk":          SwitchToFK,
-		"ffiltersliceandid":  FilterSliceAndID,
-		"ffilterslice":       FilterSlice,
-		"updatealias":        UpdateAlias2,
-		"ffilternatid":       FilterNonNativeFieldsAndIDs,
-		"ffilterid":          FilterFieldsAndIDs,
-		"field":              FieldOnly,
-		"fieldshift":         FieldShift,
-		"proxy":              ProxyType,
-		"ffilter":            FilterFields,
-		"native":             OnlyNativeField,
-		"attributealias":     AttributeAlias,
-		"ffilterforids":      OnlyIDFields,
-		"isreference":        FieldIsReference,
-		"referenceonly":      ReferenceOnly,
-		"deproxyfy":          DeProxyfyFieldName,
-		"lookuplink":         LookupLink,
-		"lookupidtype":       LookupIDType,
-		"nopointer":          RemovePointer,
-		"torepeat":           SliceToRepeat,
-		"isidfield":          IsIDField,
+		"typeprefix":        TypePrefix,
+		"reproxyfy":         Reproxyfy,
+		"tolower":           strings.ToLower,
+		"linkprops":         LinkPropertiesFor,
+		"linkrels":          LinkRelationsFor,
+		"itoa":              strconv.Itoa,
+		"structtok":         FindStructToken,
+		"proxysubrels":      ProxyLinkRelations,
+		"proxyshift":        FieldProxyShift,
+		"changefields":      ChangeFields,
+		"evdatafields":      FilterEventDataFields,
+		"isobjectfield":     IsObjectField,
+		"listfields":        Fields,
+		"checkparent":       CheckParent,
+		"norel":             FilterRelations,
+		"tovar":             FieldToVariableName,
+		"relarg":            RelationLevel,
+		"schemarg":          Schemarg,
+		"switch2fk":         SwitchToFK,
+		"ffiltersliceandid": FilterSliceAndID,
+		"ffilterslice":      FilterSlice,
+		"updatealias":       UpdateAlias2,
+		"ffilternatid":      FilterNonNativeFieldsAndIDs,
+		"ffilterid":         FilterFieldsAndIDs,
+		"field":             FieldOnly,
+		"fieldshift":        FieldShift,
+		"proxy":             ProxyType,
+		"ffilter":           FilterFields,
+		"native":            OnlyNativeField,
+		"attributealias":    AttributeAlias,
+		"ffilterforids":     OnlyIDFields,
+		"isreference":       FieldIsReference,
+		"referenceonly":     ReferenceOnly,
+		"deproxyfy":         DeProxyfyFieldName,
+		"lookuplink":        LookupLink,
+		"lookupidtype":      LookupIDType,
+		"nopointer":         RemovePointer,
+		"torepeat":          SliceToRepeat,
+		"isidfield":         IsIDField,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -94,6 +95,17 @@ var (
 			return x - 1
 		}}
 )
+
+func FilterEventDataFields(fields []*fieldToken) []*fieldToken {
+	evFields := make([]*fieldToken, 0)
+	for _, field := range fields {
+		if strings.Contains(field.Type, "[]*") {
+			continue
+		}
+		evFields = append(evFields, field)
+	}
+	return evFields
+}
 
 func IsIDField(name string) bool {
 	return strings.Contains(name, "ID")
@@ -115,16 +127,14 @@ func IsObjectField(field *fieldToken) bool {
 	return false
 }
 
-func FilterSliceAndIDs(fields []*fieldToken) []*fieldToken {
+func ChangeFields(t *structToken) []*fieldToken {
 	filtered := make([]*fieldToken, 0)
-	for _, field := range fields {
-		if strings.Contains(field.Name, "ID") ||
-			strings.Contains(field.Type, "[]*") ||
-			strings.Contains(field.Type, "[]") ||
-			field.Type == "Entity" {
-			continue
+	for _, field := range t.Fields {
+		for _, changeField := range t.ChangeSet {
+			if field.Name == changeField {
+				filtered = append(filtered, field)
+			}
 		}
-		filtered = append(filtered, field)
 	}
 	return filtered
 }

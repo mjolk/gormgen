@@ -3,8 +3,8 @@ package {{.PackageName}}
 {{$proto := eq $.Etype "proto"}}
 import (
 	"database/sql"
-	"github.com/lib/pq"{{if and (ne .Level 0) $proto}}
-	"bitbucket.org/astrotit/registration-api/uuid"{{else if ne .Level 0}}
+	"github.com/lib/pq"{{if $proto}}
+	"bitbucket.org/astrotit/registration-api/uuid"{{else}}
 	"github.com/satori/go.uuid"{{end}}
 	"fmt"
 )

@@ -106,6 +106,7 @@ type structToken struct {
 	CompositeKey []string `json:"compositeKey"`
 	Schema       string
 	Query        bool
+	ChangeSet    []string `json:"changeset"`
 }
 
 type context struct {

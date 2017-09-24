@@ -7,10 +7,10 @@ import (
 	"github.com/lib/pq" {{if $proto}}
 	"bitbucket.org/astrotit/registration-api/uuid" {{else}}
 	"github.com/satori/go.uuid"{{end}}
-	"errors"
 	"strings"
 	"time"
 	"fmt"
+	"log"
 )
 
 func checkSqlUUIDValue(v interface{}) uuid.UUID {
@@ -51,6 +51,12 @@ func checkSqlTimeValue(v interface{}) time.Time {
 		return time.Time{}
 	}
 	return val.Time
+}
+
+func validateWhere(query string) {
+	if !strings.Contains(query, "WHERE") {
+		log.Fatalf("Using and/or outside where clause")
+	}
 }
 
 {{$level := .Level}}
@@ -98,14 +104,15 @@ func (q *{{.Name}}Query) Where(prop, operator string, value interface{}) *{{.Nam
 	return q
 }
 
-//TODO validate previous existence of where
 func (q *{{.Name}}Query) And(prop, operator string, value interface{}) *{{.Name}}Query {
+	validateWhere(q.query)
 	q.params = append(q.params, value)
 	q.query = fmt.Sprintf("%s AND %s %s $%d", q.query, {{.Name}}PropToSql[prop], operator, len(q.params))
 	return q
 }
 
 func (q *{{.Name}}Query) Or(prop string, operator string, value interface{}) *{{.Name}}Query {
+	validateWhere(q.query)
 	q.params = append(q.params, value)
 	q.query = fmt.Sprintf("%s OR %s %s $%d", q.query, {{.Name}}PropToSql[prop], operator, len(q.params))
 	return q
@@ -164,7 +171,7 @@ func Find{{title .Name}}ByID(id {{.IDType}}, lvl int, ctx SQLContext) (*{{.Name}
 {{if not .LinkEntity}}
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
 	if entity.ID == {{if eq .IDType "int64"}}0{{else if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}nil{{end}} {
-		return errors.New("Cannot delete without entity identifier")
+		return fmt.Errorf("Cannot delete without entity identifier %s on %s", "Delete", "{{.Name}}")
 	}
 	_, err = ctx.Exec("DELETE FROM {{.Table}} WHERE {{.IDColumn}} = $1", entity.ID)
 	return
@@ -245,7 +252,7 @@ func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$s
 
 func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
-		return errors.New("Cannot update without entity identifier")
+		return fmt.Errorf("Cannot update without entity identifier %s on %s", "Update", "{{.Name}}")
 	}{{$l := len $natfields}}
 	queryPrts := make([]string, 0)
 	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if isreference .}}
@@ -276,7 +283,7 @@ func {{.Name}}Select(lvl int) string { {{$tok := .}}
 {{if ne .IDType ""}}
 func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
-		return errors.New("Cannot update without entity identifier")
+		return fmt.Errorf("Cannot update without entity identifier %s on %s", "Update", "{{.Name}}")
 	}{{$l := len $natfields}}
 	queryPrts := make([]string, 0)
 	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}
