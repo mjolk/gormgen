@@ -53,10 +53,25 @@ func checkSqlTimeValue(v interface{}) time.Time {
 	return val.Time
 }
 
-func validateWhere(query string) {
-	if !strings.Contains(query, "WHERE") {
-		log.Fatalf("Using and/or outside where clause")
+func hasWhere(query string) bool {
+	if strings.Contains(query, "WHERE") {
+		return true
 	}
+	return false
+}
+
+func addPlaceholders(query string, params []interface{}) string {
+	swapin := make([]interface{}, len(params))
+	for k, _ := range params {
+		swapin[k] = k+1
+	}
+	return fmt.Sprintf(query, swapin...)
+}
+
+type Query interface {
+	GetQuery() string
+	GetParams() []interface{}
+	GetDepth() int
 }
 
 {{$level := .Level}}
@@ -89,6 +104,18 @@ type {{.Name}}Query struct {
 	params []interface{}
 }
 
+func(q *{{.Name}}Query) GetQuery() string {
+	return addPlaceholders(strings.Replace(q.query, "$p", "$%d", -1), q.params)
+}
+
+func(q *{{.Name}}Query) GetParams() []interface{} {
+	return q.params
+}
+
+func(q *{{.Name}}Query) GetDepth() int {
+	return q.depth
+}
+
 func New{{.Name}}Query(lvl int) *{{.Name}}Query {
 	return &{{.Name}}Query{
 			query:fmt.Sprintf("%s %s", {{.Name}}Select(lvl), {{.Name}}From(lvl)), 
@@ -100,27 +127,25 @@ func New{{.Name}}Query(lvl int) *{{.Name}}Query {
 //TODO add where in
 func (q *{{.Name}}Query) Where(prop, operator string, value interface{}) *{{.Name}}Query {
 	q.params = append(q.params, value)
-	q.query = fmt.Sprintf("%s WHERE %s %s $%d", q.query, {{.Name}}PropToSql[prop], operator, len(q.params))
+	q.query = fmt.Sprintf("%s WHERE %s %s $p", q.query, {{.Name}}PropToSql[prop], operator)
 	return q
 }
 
 func (q *{{.Name}}Query) And(prop, operator string, value interface{}) *{{.Name}}Query {
-	validateWhere(q.query)
+	if w := hasWhere(q.query); !w {
+		log.Fatalf("using AND without WHERE clause")
+	}
 	q.params = append(q.params, value)
-	q.query = fmt.Sprintf("%s AND %s %s $%d", q.query, {{.Name}}PropToSql[prop], operator, len(q.params))
+	q.query = fmt.Sprintf("%s AND %s %s $p", q.query, {{.Name}}PropToSql[prop], operator)
 	return q
 }
 
 func (q *{{.Name}}Query) Or(prop string, operator string, value interface{}) *{{.Name}}Query {
-	validateWhere(q.query)
+	if w := hasWhere(q.query); !w {
+		log.Fatalf("using OR without WHERE clause")
+	}
 	q.params = append(q.params, value)
-	q.query = fmt.Sprintf("%s OR %s %s $%d", q.query, {{.Name}}PropToSql[prop], operator, len(q.params))
-	return q
-}
-
-func (q *{{.Name}}Query) Limit(value int) *{{.Name}}Query {
-	q.params = append(q.params, value)
-	q.query = fmt.Sprintf("%s LIMIT %d", q.query, len(q.params))
+	q.query = fmt.Sprintf("%s OR %s %s $p", q.query, {{.Name}}PropToSql[prop], operator)
 	return q
 }
 
@@ -131,36 +156,42 @@ func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
 }
 
 func (q *{{.Name}}Query) KeyUp(prop string, start, limit int) *{{.Name}}Query {
-	sqlProp := {{.Name}}PropToSql[prop]
-	q.params = append(q.params, limit)
-	q.query = strings.Replace(q.query, "FROM {{tolower .Table}}", "FROM (SELECT * FROM {{tolower .Table}} LIMIT $1) AS", 1)
+	q.params = append([]interface{}{limit}, q.params...)
+	q.query = strings.Replace(q.query, "FROM {{tolower .Table}}", "FROM (SELECT * FROM {{tolower .Table}} LIMIT $p) AS", 1)
 	if start > 0 {
 		q.params = append(q.params, start)
-		q.query = fmt.Sprintf("%s WHERE %s > $2 ORDER BY %s ASC", q.query, sqlProp, sqlProp)
-	} else {
-		q.query = fmt.Sprintf("%s ORDER BY %s ASC", q.query, sqlProp)
+		if w := hasWhere(q.query); w {
+			q = q.Where(prop, ">", start)
+		} else {
+			q = q.And(prop, ">", start)
+		}
 	}
+	q = q.OrderBy(prop, "ASC")
 	return q
 }
 
 func (q *{{.Name}}Query) KeyDown(prop string, start, limit int) *{{.Name}}Query {
-	q.params = append(q.params, start)
-	q.params = append(q.params, limit)
+	q.params = append([]interface{}{limit}, q.params...)
+	q.params = append([]interface{}{start}, q.params...)
 	sqlProp := {{.Name}}PropToSql[prop]
 	props := strings.Split(sqlProp, ".")
-	q.query = strings.Replace(q.query, "FROM {{tolower .Table}}", "FROM (SELECT * FROM {{tolower .Table}} WHERE %s < $1 ORDER BY %s DESC LIMIT $2) AS", 1)
-	q.query = fmt.Sprintf(q.query, props[len(props)-1], props[len(props)-1])
+	p := props[len(props)-1]
+	q.query = strings.Replace(q.query, "FROM {{tolower .Table}}", "FROM (SELECT * FROM {{tolower .Table}} limited WHERE limited.%[1]s < $p ORDER BY limited.%[1]s DESC LIMIT $p) AS", 1)
+	q.query = fmt.Sprintf(q.query, p)
 	q.query = fmt.Sprintf(`SELECT t.* FROM ( %s ) AS t ORDER BY t.%s ASC`, 
-			q.query, props[len(props)-1])
+			q.query, p)
 	return q	
 }
-	
 
 func (q *{{.Name}}Query) Execute(ctx SQLContext) ([]*{{.Name}}, error) {
+	q.query = strings.Replace(q.query, "$p", "$%d", -1)
+	q.query = addPlaceholders(q.query, q.params)
 	return Query{{title .Name}}s(q.query, q.params, q.depth, ctx)
 }
 
 func (q *{{.Name}}Query) Single(ctx SQLContext) (*{{.Name}}, error) {
+	q.query = strings.Replace(q.query, "$p", "$%d", -1)
+	q.query = addPlaceholders(q.query, q.params)
 	return Query{{title .Name}}(q.query, q.params, q.depth, ctx)
 }
 

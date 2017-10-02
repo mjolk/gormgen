@@ -8,47 +8,37 @@ import (
 	"github.com/satori/go.uuid" {{end}}
 	"fmt"
 	"encoding/json"
+	"bytes"
 )
 
-func checkNil(val IntIdentifier) int64 {
-	if val != nil {
-		return val.Id()
-	}
-	return 0
-}
-
-func checkNilUUID(val UUIDIdentifier) uuid.UUID {
-	if val != nil {
-		return val.Id()
-	}
-	return uuid.UUID{}
-}
-
-{{range .Tokens}}{{$curname := .Name}}{{range .Fields}}{{if eq .Name "ID"}}{{if isuuid .Type}}
-func (e *{{$curname}}) Id() uuid.UUID {
+{{range .Tokens}}{{$curname := .Name}}{{range .Fields}}{{if eq .Name "ID"}}
+	func(e *{{$curname}}) Id(){{if isuuid .Type}} uuid.UUID{{else}} int64{{end}} {
 	return e.ID
+}
+{{end}}{{end}}{{end}}
+{{range .Tokens}}{{$curname := .Name}}{{$evfields := evdatafields .Fields }}{{range $evfields}}{{$obj := isobjectfield .}}{{if $obj}}{{if isuuid (lookupidtype .Type)}}
+func (e *{{$curname}}) {{.Name}}ID() uuid.UUID {
+	if e.{{.Name}} != nil {
+		return e.{{.Name}}.Id()
+	}
+	return uuid.Nil
 } {{else}}
-func (e *{{$curname}}) Id() int64 {
-	return e.ID
+func (e *{{$curname}}) {{.Name}}ID() int64 {
+	if e.{{.Name}} != nil {
+		return e.{{.Name}}.Id()
+	} 
+	return 0
 }{{end}}{{end}}{{end}}
 
 func (e *{{.Name}}) EventData() []byte {
 	jsStruct := struct { {{$evfields := evdatafields .Fields}} {{range $evfields}} {{$obj := isobjectfield .}}
 	{{.Name}} {{if $obj}}{{if isuuid (lookupidtype .Type)}}uuid.UUID{{else}}int64{{end}}{{else}}{{.Type}}{{end}}{{end}}	
 	}{ {{range $evfields}} {{$obj := isobjectfield .}}
-	{{.Name}}: {{if $obj}}{{if isuuid (lookupidtype .Type)}}checkNilUUID(e.{{.Name}}){{else}}checkNil(e.{{.Name}}){{end}}{{else}}e.{{.Name}}{{end}},{{end}}
+	{{.Name}}: {{if $obj}}{{if isuuid (lookupidtype .Type)}}e.{{.Name}}ID(){{else}}e.{{.Name}}ID(){{end}}{{else}}e.{{.Name}}{{end}},{{end}}
 	}
 	enc, _ := json.Marshal(jsStruct)
 	return enc
 }{{end}}
-{{range .Tokens}}{{$fields := changefields .}}{{$curname := .Name}}{{if gt (len $fields) 0}}
-type {{.Name}}Updater interface { {{range $fields}}
-	Get{{.Name}}() {{.Type}} {{end}}
-}
-{{range $fields}}
-func (e *{{$curname}}) Get{{.Name}}() {{.Type}} {
-	return e.{{.Name}}
-}{{end}}{{end}}{{end}} 
 {{range .Tokens}}{{$fields := changefields .}}{{$curname := .Name}}
 {{range .Fields}}{{if eq .Name "Version"}}
 func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
@@ -57,7 +47,7 @@ func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
 		return fmt.Errorf("version mismatch, object already newer version")
 	}
 	e.Version = update.Version
-	e.Updated = time.Now()
+	e.Updated = time.Now().UTC()
 	return nil
 }
 {{end}}{{if eq .Name "Attributes"}}
@@ -66,19 +56,20 @@ func (e *{{$curname}}) Attr() []*Attribute {
 }
 {{end}}{{end}}{{if gt (len $fields) 0}}
 func (e *{{.Name}}) ChangeSet(
-	update {{.Name}}Updater,
+	update *{{.Name}},
 	login *Login,
 	buffer chan<- ObjectEvent,
 	tpe *ObjectType,
 	) bool {
 	changed := false{{range $fields}}{{if ne .Name "Version"}}{{$objectfield := isobjectfield .}}
 {{if isuuid .Type}}
-if !uuid.Equal(e.{{.Name}}, update.Get{{.Name}}()) {
+if !uuid.Equal(e.{{.Name}}, update.{{.Name}}) { {{else if isbyte .Type}}
+if !bytes.Equal(e.{{.Name}}, update.{{.Name}}) { 
 {{else if $objectfield }}{{if isuuid (lookupidtype .Type)}}
-if !uuid.Equal(checkNilUUID(e.{{.Name}}), checkNilUUID(update.Get{{.Name}}())) { {{else}}
-if checkNil(e.{{.Name}}) != checkNil(update.Get{{.Name}}()) { {{end}}
+if !uuid.Equal(e.{{.Name}}ID(), update.{{.Name}}ID()) { {{else}}
+if e.{{.Name}}ID() != update.{{.Name}}ID() { {{end}}
 {{else}}
-if e.{{.Name}} != update.Get{{.Name}}() {
+if e.{{.Name}} != update.{{.Name}} {
 {{end}}
 buffer <- ObjectEvent{
 		Type: tpe,
@@ -87,13 +78,13 @@ buffer <- ObjectEvent{
 		Created: time.Now(),
 		PropertyName: "{{.Name}}", {{if isuuid .Type}}
 		OldValue: e.{{.Name}}.String(),
-		NewValue: update.Get{{.Name}}().String(),{{else if isobjectfield .}}{{$type := lookupidtype .Type}}
-		OldValue: {{if isuuid $type}}checkNilUUID(e.{{.Name}}).String(),{{else}}strconv.FormatInt(checkNil(e.{{.Name}}), 10),{{end}}
-		NewValue: {{if isuuid $type}}checkNilUUID(update.Get{{.Name}}()).String(),{{else}}strconv.FormatInt(checkNil(update.Get{{.Name}}()), 10),{{end}}{{else}}
-		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(e.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else}}e.{{.Name}},{{end}}
-		NewValue:{{if isint .Type}}strconv.FormatInt(update.Get{{.Name}}(), 10),{{else if istime .Type}}strconv.FormatInt(update.Get{{.Name}}().Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(update.Get{{.Name}}()),{{else}}update.Get{{.Name}}(),{{end}}{{end}}
+		NewValue: update.{{.Name}}.String(),{{else if isobjectfield .}}{{$type := lookupidtype .Type}}
+		OldValue: {{if isuuid $type}}e.{{.Name}}ID().String(),{{else}}strconv.FormatInt(e.{{.Name}}ID(), 10),{{end}}
+		NewValue: {{if isuuid $type}}update.{{.Name}}ID().String(),{{else}}strconv.FormatInt(update.{{.Name}}ID(), 10),{{end}}{{else}}
+		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(e.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else if isbyte .Type}}string(e.{{.Name}}[:]),{{else}}e.{{.Name}},{{end}}
+		NewValue:{{if isint .Type}}strconv.FormatInt(update.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(update.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(update.{{.Name}}),{{else if isbyte .Type}}string(update.{{.Name}}[:]),{{else}}update.{{.Name}},{{end}}{{end}}
 	}
-	e.{{.Name}} = update.Get{{.Name}}()
+	e.{{.Name}} = update.{{.Name}}
 	changed = true
 }
 {{end}}
