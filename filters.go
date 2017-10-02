@@ -46,44 +46,45 @@ var (
 			}
 			return false
 		},
-		"typeprefix":         TypePrefix,
-		"reproxyfy":          Reproxyfy,
-		"tolower":            strings.ToLower,
-		"linkprops":          LinkPropertiesFor,
-		"linkrels":           LinkRelationsFor,
-		"itoa":               strconv.Itoa,
-		"structtok":          FindStructToken,
-		"proxysubrels":       ProxyLinkRelations,
-		"proxyshift":         FieldProxyShift,
-		"ffiltersliceandids": FilterSliceAndIDs,
-		"isobjectfield":      IsObjectField,
-		"listfields":         Fields,
-		"checkparent":        CheckParent,
-		"norel":              FilterRelations,
-		"tovar":              FieldToVariableName,
-		"relarg":             RelationLevel,
-		"schemarg":           Schemarg,
-		"switch2fk":          SwitchToFK,
-		"ffiltersliceandid":  FilterSliceAndID,
-		"ffilterslice":       FilterSlice,
-		"updatealias":        UpdateAlias2,
-		"ffilternatid":       FilterNonNativeFieldsAndIDs,
-		"ffilterid":          FilterFieldsAndIDs,
-		"field":              FieldOnly,
-		"fieldshift":         FieldShift,
-		"proxy":              ProxyType,
-		"ffilter":            FilterFields,
-		"native":             OnlyNativeField,
-		"attributealias":     AttributeAlias,
-		"ffilterforids":      OnlyIDFields,
-		"isreference":        FieldIsReference,
-		"referenceonly":      ReferenceOnly,
-		"deproxyfy":          DeProxyfyFieldName,
-		"lookuplink":         LookupLink,
-		"lookupidtype":       LookupIDType,
-		"nopointer":          RemovePointer,
-		"torepeat":           SliceToRepeat,
-		"isidfield":          IsIDField,
+		"typeprefix":        TypePrefix,
+		"reproxyfy":         Reproxyfy,
+		"tolower":           strings.ToLower,
+		"linkprops":         LinkPropertiesFor,
+		"linkrels":          LinkRelationsFor,
+		"itoa":              strconv.Itoa,
+		"structtok":         FindStructToken,
+		"proxysubrels":      ProxyLinkRelations,
+		"proxyshift":        FieldProxyShift,
+		"changefields":      ChangeFields,
+		"evdatafields":      FilterEventDataFields,
+		"isobjectfield":     IsObjectField,
+		"listfields":        Fields,
+		"checkparent":       CheckParent,
+		"norel":             FilterRelations,
+		"tovar":             FieldToVariableName,
+		"relarg":            RelationLevel,
+		"schemarg":          Schemarg,
+		"switch2fk":         SwitchToFK,
+		"ffiltersliceandid": FilterSliceAndID,
+		"ffilterslice":      FilterSlice,
+		"updatealias":       UpdateAlias2,
+		"ffilternatid":      FilterNonNativeFieldsAndIDs,
+		"ffilterid":         FilterFieldsAndIDs,
+		"field":             FieldOnly,
+		"fieldshift":        FieldShift,
+		"proxy":             ProxyType,
+		"ffilter":           FilterFields,
+		"native":            OnlyNativeField,
+		"attributealias":    AttributeAlias,
+		"ffilterforids":     OnlyIDFields,
+		"isreference":       FieldIsReference,
+		"referenceonly":     ReferenceOnly,
+		"deproxyfy":         DeProxyfyFieldName,
+		"lookuplink":        LookupLink,
+		"lookupidtype":      LookupIDType,
+		"nopointer":         RemovePointer,
+		"torepeat":          SliceToRepeat,
+		"isidfield":         IsIDField,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -94,6 +95,17 @@ var (
 			return x - 1
 		}}
 )
+
+func FilterEventDataFields(fields []*fieldToken) []*fieldToken {
+	evFields := make([]*fieldToken, 0)
+	for _, field := range fields {
+		if strings.Contains(field.Type, "[]*") {
+			continue
+		}
+		evFields = append(evFields, field)
+	}
+	return evFields
+}
 
 func IsIDField(name string) bool {
 	return strings.Contains(name, "ID")
@@ -115,16 +127,14 @@ func IsObjectField(field *fieldToken) bool {
 	return false
 }
 
-func FilterSliceAndIDs(fields []*fieldToken) []*fieldToken {
+func ChangeFields(t *structToken) []*fieldToken {
 	filtered := make([]*fieldToken, 0)
-	for _, field := range fields {
-		if strings.Contains(field.Name, "ID") ||
-			strings.Contains(field.Type, "[]*") ||
-			strings.Contains(field.Type, "[]") ||
-			field.Type == "Entity" {
-			continue
+	for _, field := range t.Fields {
+		for _, changeField := range t.ChangeSet {
+			if field.Name == changeField {
+				filtered = append(filtered, field)
+			}
 		}
-		filtered = append(filtered, field)
 	}
 	return filtered
 }
@@ -246,7 +256,7 @@ func LinkRelationsFor(tpe string) []*relation {
 	relsFound := make(map[string]int, 0)
 	addRelations := make([]*relation, 0)
 	for _, tk := range newStructToks {
-		for _, relts := range tk.Relations {
+		for _, relts := range tk.relations {
 			if relts.LinkRelation {
 				if strings.Contains(relts.FieldName, relLookup) {
 					rlPrts := strings.Split(relts.FieldName, ".")
@@ -274,10 +284,10 @@ func FindStructToken(tpe string) *structToken {
 func ProxyLinkRelations(tpe string) []*relation {
 	fts := make([]*relation, 0)
 	for _, tok := range newStructToks {
-		for _, rel := range tok.Relations {
+		for _, rel := range tok.relations {
 			if rel.IsManyToMany() {
 				if rel.Type == tpe {
-					for _, crel := range rel.SubRelations(tok.Relations) {
+					for _, crel := range rel.SubRelations(tok.relations) {
 						if crel.LinkRelation {
 							dup := false
 							for _, lrel := range fts {
@@ -470,7 +480,7 @@ func UpdateAlias2(tok *structToken, field *fieldToken, alias string) string {
 	fldPrtsLen := len(fldPrts)
 	if fldPrtsLen > 1 {
 		lookup := strings.Join(fldPrts[:fldPrtsLen-1], ".")
-		for _, rel := range tok.Relations {
+		for _, rel := range tok.relations {
 			if lookup == rel.ProxyFieldName {
 				if field.IsLinkField {
 					return rel.LinkAlias
@@ -491,7 +501,7 @@ func UpdateAlias(tok *structToken, field, alias string) string {
 	prts := strings.Split(field, ".")
 	lookup := strings.TrimPrefix(prts[0], "proxy")
 	var result string
-	if result = lookUpAlias(tok.Relations, lookup, prts); result != "" {
+	if result = lookUpAlias(tok.relations, lookup, prts); result != "" {
 		return result
 	}
 	return alias
