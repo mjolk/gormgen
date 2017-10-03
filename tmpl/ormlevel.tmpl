@@ -45,7 +45,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 	result := make([]*{{.Name}}, 0)
 	for rs.Next() {
 		dest := []interface{}{ {{range .Fields}}
-		{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new(pq.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else if isuuid .Type}}new(uuid.NullUUID){{else -}}new(sql.RawBytes){{end}},{{end}}
+		{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new(pq.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else if isuuid .Type}}new(uuid.NullUUID){{else if isbyte .Type}}&[]byte{}{{else -}}new(sql.RawBytes){{end}},{{end}}
 		}
 		if err = rs.Scan(dest...); err != nil {
 			return nil, err
