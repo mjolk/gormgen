@@ -11,11 +11,18 @@ import (
 	"bytes"
 )
 
-{{range .Tokens}}{{$curname := .Name}}{{range .Fields}}{{if eq .Name "ID"}}
-	func(e *{{$curname}}) Id(){{if isuuid .Type}} uuid.UUID{{else}} int64{{end}} {
+{{range .Tokens}}{{$curname := .Name}}{{if islinked .}}
+func(e *{{$curname}}) Id() int64 {
+	if e.LinkID > 0 {
+		return e.LinkID
+	}
+	return e.ID
+} 
+{{else}}{{range .Fields}}{{if eq .Name "ID"}}
+func(e *{{$curname}}) Id(){{if isuuid .Type}} uuid.UUID{{else}} int64{{end}} {
 	return e.ID
 }
-{{end}}{{end}}{{end}}
+{{end}}{{end}}{{end}}{{end}}
 {{range .Tokens}}{{$curname := .Name}}{{$evfields := evdatafields .Fields }}{{range $evfields}}{{$obj := isobjectfield .}}{{if $obj}}{{if isuuid (lookupidtype .Type)}}
 func (e *{{$curname}}) {{.Name}}ID() uuid.UUID {
 	if e.{{.Name}} != nil {
@@ -30,38 +37,47 @@ func (e *{{$curname}}) {{.Name}}ID() int64 {
 	return 0
 }{{end}}{{end}}{{end}}
 
-func (e *{{.Name}}) EventData() []byte {
-	jsStruct := struct { {{$evfields := evdatafields .Fields}} {{range $evfields}} {{$obj := isobjectfield .}}
-	{{.Name}} {{if $obj}}{{if isuuid (lookupidtype .Type)}}uuid.UUID{{else}}int64{{end}}{{else}}{{.Type}}{{end}}{{end}}	
-	}{ {{range $evfields}} {{$obj := isobjectfield .}}
-	{{.Name}}: {{if $obj}}{{if isuuid (lookupidtype .Type)}}e.{{.Name}}ID(){{else}}e.{{.Name}}ID(){{end}}{{else}}e.{{.Name}}{{end}},{{end}}
+func (e *{{.Name}}) EventData() []byte { 
+jsStruct := struct { {{$evfields := evdatafields .Fields}}{{range $evfields}}{{$obj := and (isobjectfield .) (.Normalize)}}{{if ne .JSON "-"}}
+{{.Name}} {{if $obj}}{{if isuuid (lookupidtype .Type)}}uuid.UUID{{else}}int64{{end}}{{else}}{{.Type}}{{end}} `json:"{{.JSON}}"`{{end}}{{end}}
+}{ {{range $evfields}} {{$obj := and (isobjectfield .) (.Normalize)}}{{if ne .JSON "-"}}
+{{.Name}}: {{if $obj}}{{if isuuid (lookupidtype .Type)}}e.{{.Name}}ID(){{else}}e.{{.Name}}ID(){{end}}{{else}}e.{{.Name}}{{end}},{{end}}{{end}}
 	}
-	enc, _ := json.Marshal(jsStruct)
+	enc, err := json.Marshal(jsStruct)
+	if err != nil {
+		panic(err)
+	}
 	return enc
 }{{end}}
 {{range .Tokens}}{{$fields := changefields .}}{{$curname := .Name}}
-{{range .Fields}}{{if eq .Name "Version"}}
+{{if versioned .}}
+func (e *{{.Name}}) GetVersion() int64 {
+	return e.Version
+}
+
 func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
 	update.Version++
 	if e.Version >= update.Version {
 		return fmt.Errorf("version mismatch, object already newer version")
 	}
-	e.Version = update.Version
 	e.Updated = time.Now().UTC()
 	return nil
 }
-{{end}}{{if eq .Name "Attributes"}}
+{{else}}
+func (e *{{.Name}}) GetVersion() int64 {
+	return 0
+}
+{{end}}
+{{range .Fields}}{{if eq .Name "Attributes"}}
 func (e *{{$curname}}) Attr() []*Attribute {
 	return e.Attributes
 }
 {{end}}{{end}}{{if gt (len $fields) 0}}
 func (e *{{.Name}}) ChangeSet(
 	update *{{.Name}},
-	login *Login,
-	buffer chan<- ObjectEvent,
-	tpe *ObjectType,
-	) bool {
-	changed := false{{range $fields}}{{if ne .Name "Version"}}{{$objectfield := isobjectfield .}}
+	) (bool, []*ObjectChange) {
+	changes := make([]*ObjectChange, 0)
+	changed := false{{range $fields}}{{if ne .Name "Updated"}}{{$objectfield := isobjectfield .}}
 {{if isuuid .Type}}
 if !uuid.Equal(e.{{.Name}}, update.{{.Name}}) { {{else if isbyte .Type}}
 if !bytes.Equal(e.{{.Name}}, update.{{.Name}}) { 
@@ -71,11 +87,7 @@ if e.{{.Name}}ID() != update.{{.Name}}ID() { {{end}}
 {{else}}
 if e.{{.Name}} != update.{{.Name}} {
 {{end}}
-buffer <- ObjectEvent{
-		Type: tpe,
-		Action: UPDATE,
-		Login: login,
-		Created: time.Now(),
+	changes = append(changes, &ObjectChange{
 		PropertyName: "{{.Name}}", {{if isuuid .Type}}
 		OldValue: e.{{.Name}}.String(),
 		NewValue: update.{{.Name}}.String(),{{else if isobjectfield .}}{{$type := lookupidtype .Type}}
@@ -83,13 +95,13 @@ buffer <- ObjectEvent{
 		NewValue: {{if isuuid $type}}update.{{.Name}}ID().String(),{{else}}strconv.FormatInt(update.{{.Name}}ID(), 10),{{end}}{{else}}
 		OldValue:{{if isint .Type}}strconv.FormatInt(e.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(e.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(e.{{.Name}}),{{else if isbyte .Type}}string(e.{{.Name}}[:]),{{else}}e.{{.Name}},{{end}}
 		NewValue:{{if isint .Type}}strconv.FormatInt(update.{{.Name}}, 10),{{else if istime .Type}}strconv.FormatInt(update.{{.Name}}.Unix(), 10),{{else if isbool .Type}}strconv.FormatBool(update.{{.Name}}),{{else if isbyte .Type}}string(update.{{.Name}}[:]),{{else}}update.{{.Name}},{{end}}{{end}}
-	}
+	})
 	e.{{.Name}} = update.{{.Name}}
 	changed = true
 }
 {{end}}
 {{end}}
-return changed
+return changed, changes
 }
 {{end}}
 {{end}}

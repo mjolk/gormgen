@@ -35,7 +35,7 @@ func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Na
 	if len(result) > 1 {
 		return nil, fmt.Errorf("More than one result, %d results found", len(result)) 
 	} else if len(result) == 0 {
-		return nil, fmt.Errorf("No result found")	
+		return nil, sql.ErrNoRows
 	}
 	return result[0], nil
 }
@@ -84,7 +84,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 			var {{typeprefix .Relation ""}}{{.Relation.Type}} *{{.Relation.Type}}
 			if len({{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}) > 0 {
 				for _, rel := range {{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} {
-					if rel.ID == s.{{.Relation.ProxyFieldName}}.ID {
+				if rel.ID == s.{{.Relation.ProxyFieldName}}.ID{{if .Relation.IsManyToMany}} && rel.LinkID == s.{{.Relation.ProxyFieldName}}.LinkID{{end}} {
 						New{{tovar .Relation.FieldName}}ID = false
 						{{typeprefix .Relation ""}}{{.Relation.Type}} = rel
 					}

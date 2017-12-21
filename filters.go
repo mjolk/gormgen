@@ -85,6 +85,8 @@ var (
 		"nopointer":         RemovePointer,
 		"torepeat":          SliceToRepeat,
 		"isidfield":         IsIDField,
+		"versioned":         Versioned,
+		"islinked":          LinkedEntity,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -95,6 +97,24 @@ var (
 			return x - 1
 		}}
 )
+
+func LinkedEntity(token *structToken) bool {
+	for _, f := range token.Fields {
+		if f.Name == "LinkID" {
+			return true
+		}
+	}
+	return false
+}
+
+func Versioned(token *structToken) bool {
+	for _, f := range token.Fields {
+		if f.Name == "Version" {
+			return true
+		}
+	}
+	return false
+}
 
 func FilterEventDataFields(fields []*fieldToken) []*fieldToken {
 	evFields := make([]*fieldToken, 0)

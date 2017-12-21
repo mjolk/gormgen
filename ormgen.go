@@ -21,10 +21,10 @@ USAGE
     ormgen [options] paths...
 
 OPTIONS
-    -l 
+    -l
        Set the depth to which relations can be fetched
 
-    -t 
+    -t
        Select entity type output: protobuf or regular go structs,
        pass either 'go' for regular structs or 'proto' for protobuf
 
@@ -91,6 +91,7 @@ type fieldToken struct {
 	IsInterface bool   `json:"interface"`
 	Lazy        bool   `json:"lazy"`
 	JSON        string `json:"json"`
+	Normalize   bool   `json:"normalize"`
 }
 
 type structToken struct {
@@ -105,7 +106,7 @@ type structToken struct {
 	LinkEntity   bool
 	CompositeKey []string `json:"compositeKey"`
 	Schema       string
-	Query        bool
+	Query        bool     `json:"query"`
 	ChangeSet    []string `json:"changeset"`
 }
 

@@ -116,12 +116,22 @@ func(q *{{.Name}}Query) GetDepth() int {
 	return q.depth
 }
 
+func(q *{{.Name}}Query) Transform(t func(string)string) *{{.Name}}Query {
+	q.query = t(q.query)
+	return q
+}
+
 func New{{.Name}}Query(lvl int) *{{.Name}}Query {
 	return &{{.Name}}Query{
 			query:fmt.Sprintf("%s %s", {{.Name}}Select(lvl), {{.Name}}From(lvl)), 
 			params:make([]interface{}, 0),
 			depth: lvl,
 		}
+}
+
+func (q *{{.Name}}Query) AddParams(value []interface{}) *{{.Name}}Query {
+	q.params = append(q.params, value...)
+	return q
 }
 
 //TODO add where in
@@ -261,9 +271,17 @@ func {{.Name}}From(lvl int) string {
 	return {{.Name}}Froms[lvl]()
 }
 
+func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
+	err = insert{{title .Name}}(entity, ctx, "")
+	return
+}
 
+func Upsert{{title .Name}}(entity *{{.Name}}, ctx SQLContext, on string) (err error) {
+	err = insert{{title .Name}}(entity, ctx, on)
+	return
+}
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
+func insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext, on string) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
 	var query string
 	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
 	if entity.{{referenceonly .Name}} == nil {
@@ -274,8 +292,14 @@ func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$s
 	values = append(values, entity.{{.Name}}){{end}}{{end}}
 	if len(values) == 0 {
 		query = `INSERT INTO {{.Table}} DEFAULT VALUES`
-	} else {
+	} else if entity.ID == 0 {
 		query = `INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
+	} else {
+		values = append([]interface{}{entity.ID}, values...)
+		query = `INSERT INTO {{.Table}} ({{.IDColumn}}, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES($1, {{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus2 $idx}}{{end}})`
+	}
+	if on != "" {
+		query = fmt.Sprintf("%s ON CONFLICT %s", query, on)
 	}
 	_, err = ctx.Exec(query, values...)
 	return
