@@ -8,7 +8,7 @@ package {{.PackageName}};
 
 {{range .Tokens}}
 message {{.Name}} { {{range $index, $field := .Fields}} {{if not $field.IsInterface}}
-  {{if istime $field.Type }}google.protobuf.Timestamp{{else if isstring $field.Type}}string{{ else if or (isuuid $field.Type) (isbyte $field.Type) -}}bytes{{else}}{{ torepeat $field.Type -}}{{- end }} {{ tolower $field.Name }} = {{plus1 $index}} [(gogoproto.customname) = "{{.Name}}", (gogoproto.jsontag) = "{{.JSON}}"{{if istime $field.Type}}, (gogoproto.stdtime) = true, (gogoproto.nullable) = false{{end}}{{if isuuid $field.Type}}, (gogoproto.customtype) = "bitbucket.org/astrotit/registration-api/uuid.UUID", (gogoproto.nullable) = false{{end}}];{{end}}{{end}}
+  {{if istime $field.Type }}google.protobuf.Timestamp{{else if isstring $field.Type}}string{{ else if or (isuuid $field.Type) (isbyte $field.Type) -}}bytes{{else}}{{ torepeat $field.Type -}}{{- end }} {{ tolower $field.Name }} = {{plus1 $index}} [(gogoproto.customname) = "{{.Name}}", (gogoproto.jsontag) = "{{.JSON}}"{{if istime $field.Type}}, (gogoproto.stdtime) = true, (gogoproto.nullable) = false{{end}}{{if isuuid $field.Type}}, (gogoproto.customtype) = "gitlab.com/astrotit/registration-api/uuid.UUID", (gogoproto.nullable) = false{{end}}];{{end}}{{end}}
 }
 {{end}}
 {{end}}

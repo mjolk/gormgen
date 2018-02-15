@@ -4,7 +4,7 @@ package {{.PackageName}}
 import (
 	"database/sql"
 	"github.com/lib/pq"{{if $proto}}
-	"bitbucket.org/astrotit/registration-api/uuid"{{else}}
+	"gitlab.com/astrotit/registration-api/uuid"{{else}}
 	"github.com/satori/go.uuid"{{end}}
 	"fmt"
 )

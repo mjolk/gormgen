@@ -4,7 +4,7 @@ package {{.PackageName}}
 import (
 	"time"
 	"strconv" {{if $proto}}
-	"bitbucket.org/astrotit/registration-api/uuid" {{else}}
+	"gitlab.com/astrotit/registration-api/uuid" {{else}}
 	"github.com/satori/go.uuid" {{end}}
 	"fmt"
 	"encoding/json"
