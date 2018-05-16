@@ -209,7 +209,7 @@ func Find{{title .Name}}ByID(id {{.IDType}}, lvl int, ctx SQLContext) (*{{.Name}
         return New{{.Name}}Query(lvl).Where("ID", "=", id).Single(ctx)
 }
 
-{{if not .LinkEntity}}
+{{/*{{if not .LinkEntity}}*/}}
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
 	if entity.ID == {{if eq .IDType "int64"}}0{{else if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}nil{{end}} {
 		return fmt.Errorf("Cannot delete without entity identifier %s on %s", "Delete", "{{.Name}}")
@@ -217,14 +217,14 @@ func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
 	_, err = ctx.Exec("DELETE FROM {{.Table}} WHERE {{.IDColumn}} = $1", entity.ID)
 	return
 }
-{{else}}//hack - need to check if this is a good permanent solution and not only for this schema
+{{/*{{else}}//hack - need to check if this is a good permanent solution and not only for this schema
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}
 	queryWhere := `WHERE {{range $fi, $fld := $natfields}}{{if $fi}} AND {{end}}{{.Column}} = ${{plus1 $fi}}{{end}}`
 	query := "DELETE FROM {{.Table}} " + queryWhere
 	_, err = ctx.Exec(query, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
 	return
 }
-{{end}}
+{{end}}*/}}
 {{ if .Composite}}
 
 type {{title .Name}}Loader func(*sql.Rows) ([]*{{.Name}}, error)
@@ -292,7 +292,7 @@ func insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext, on string) (err er
 	values = append(values, entity.{{.Name}}){{end}}{{end}}
 	if len(values) == 0 {
 		query = `INSERT INTO {{.Table}} DEFAULT VALUES`
-	} else if entity.ID == 0 {
+	} else if entity.ID == {{if eq "uuid.UUID" (lookupidtype .Name)}}uuid.Nil{{else}}0{{end}} {
 		query = `INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
 	} else {
 		values = append([]interface{}{entity.ID}, values...)
