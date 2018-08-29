@@ -5,7 +5,7 @@ import (
 	"time"
 	"strconv" {{if $proto}}
 	"gitlab.com/astrotit/registration-api/uuid" {{else}}
-	"github.com/satori/go.uuid" {{end}}
+	"github.com/gofrs/uuid" {{end}}
 	"fmt"
 	"encoding/json"
 	"bytes"
@@ -79,10 +79,10 @@ func (e *{{.Name}}) ChangeSet(
 	changes := make([]*ObjectChange, 0)
 	changed := false{{range $fields}}{{if ne .Name "Updated"}}{{$objectfield := isobjectfield .}}
 {{if isuuid .Type}}
-if !uuid.Equal(e.{{.Name}}, update.{{.Name}}) { {{else if isbyte .Type}}
+if e.{{.Name}} != update.{{.Name}} { {{else if isbyte .Type}}
 if !bytes.Equal(e.{{.Name}}, update.{{.Name}}) { 
 {{else if $objectfield }}{{if isuuid (lookupidtype .Type)}}
-if !uuid.Equal(e.{{.Name}}ID(), update.{{.Name}}ID()) { {{else}}
+if e.{{.Name}}ID() != update.{{.Name}}ID() { {{else}}
 if e.{{.Name}}ID() != update.{{.Name}}ID() { {{end}}
 {{else}}
 if e.{{.Name}} != update.{{.Name}} {

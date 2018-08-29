@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"github.com/lib/pq" {{if $proto}}
 	"gitlab.com/astrotit/registration-api/uuid" {{else}}
-	"github.com/satori/go.uuid"{{end}}
+	"github.com/gofrs/uuid"{{end}}
 	"strings"
 	"time"
 	"fmt"
