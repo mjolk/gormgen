@@ -1,3 +1,9 @@
+/**
+ * File   : ormgen.go
+ * License: MIT/X11
+ * Author : Dries Pauwels <2mjolk@gmail.com>
+ * Date   : zo 24 feb 2019 01:37
+ */
 package main
 
 //go:generate go-bindata tmpl/
@@ -188,7 +194,11 @@ func (r *relation) IsManyToOne() bool {
 }
 
 func (r *relation) Equals(rel *relation) bool {
-	if r.RelationType == rel.RelationType && r.Type == rel.Type && r.Field == rel.Field && r.Table == rel.Table && rel.FieldName == r.FieldName {
+	if r.RelationType == rel.RelationType &&
+		r.Type == rel.Type &&
+		r.Field == rel.Field &&
+		r.Table == rel.Table &&
+		rel.FieldName == r.FieldName {
 		return true
 	}
 	return false
@@ -442,9 +452,9 @@ func findRelation(field string, rels []*relation) *relation {
 
 func proxyfyPath(path string, rels []*relation) string {
 	prts := strings.Split(path, ".")
-	edit := make([]string, len(prts))
-	copy(edit, prts)
 	prtsLen := len(prts)
+	edit := make([]string, prtsLen)
+	copy(edit, prts)
 	for i := prtsLen; i >= 0; i-- {
 		var lookup string
 		if i == 0 {
@@ -574,11 +584,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		}
 		//is a relation field
 		res.Composite = true
-		if ctx != nil {
-			if ctx.Level >= maxLevel /*&& !ctx.IsLink*/ {
-				continue
-			}
-		} else if maxLevel == 0 {
+		if (ctx != nil && ctx.Level >= maxLevel /*&& !ctx.IsLink*/) || maxLevel == 0 {
 			continue
 		}
 		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
