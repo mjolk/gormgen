@@ -20,7 +20,7 @@ func create{{.Name}}Table(schema string) string {
 type createTable func (id string) string
 
 var tables = map[string]createTable{ {{range .Tokens}}
-	"{{.Name}}": create{{.Name}}Table,{{end}} 
+	"{{.Name}}": create{{.Name}}Table,{{end}}
 }
 
 func New(schema string, st []string) []string {
@@ -28,13 +28,13 @@ func New(schema string, st []string) []string {
 	if len(st) > 0 {
 		for _, t := range st {
 			if create, ok := tables[t]; ok {
-				tstrings = append(tstrings, create(schema))	
+				tstrings = append(tstrings, create(schema))
 			}
 		}
 		return tstrings
 	}
 	for _, create := range tables {
-		tstrings = append(tstrings, create(schema))	
+		tstrings = append(tstrings, create(schema))
 	}
 	return tstrings
 }
@@ -55,4 +55,6 @@ var typeSetup = `
 insert into %s.object_type values {{range $i , $val := .Tokens}}
 	{{if $i}},{{end}}(default, '{{.Name}}', '{{.Name}}'){{end}};
 `
+{{end}}
+{{define "index"}}
 {{end}}

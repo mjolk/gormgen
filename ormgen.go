@@ -53,11 +53,6 @@ OPTIONS
 
     -h, -help
         Print help and exit.
-
-EXAMPLES
-
-NOTES
-        //go:generate ormgen $GOFILE
 `
 	//COLUMN col
 	COLUMN = "column"
@@ -74,6 +69,11 @@ NOTES
 	//MANYTOONE relation type
 	MANYTOONE = "manytoone"
 )
+
+type SQLIndex struct {
+	Unique  bool     `json:"unique"`
+	Columns []string `json:"columns"`
+}
 
 type fieldToken struct {
 	Relation    *relation
@@ -111,9 +111,11 @@ type structToken struct {
 	Alias        string `json:"alias"`
 	LinkEntity   bool
 	CompositeKey []string `json:"compositeKey"`
-	Schema       string
+	Schema       string   `json:"schema"`
 	Query        bool     `json:"query"`
 	ChangeSet    []string `json:"changeset"`
+	SQLIndex     SQLIndex
+	Embedded     bool
 }
 
 type context struct {
@@ -245,8 +247,6 @@ func main() {
 	inputLevel = *max
 
 	if *help {
-		// not an error, send to stdout
-		// that way people can: scaneo -h | less
 		fmt.Println(usageText)
 		return
 	}
