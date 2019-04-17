@@ -1,3 +1,9 @@
+/**
+ * File   : ormgen.go
+ * License: MIT/X11
+ * Author : Dries Pauwels <2mjolk@gmail.com>
+ * Date   : zo 24 feb 2019 01:37
+ */
 package main
 
 //go:generate go-bindata tmpl/
@@ -6,9 +12,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,12 +21,19 @@ import (
 
 const (
 	usageText = `ORMGEN
-    Generate Go code to convert database rows into arbitrary structs.
-
+    Generate Go code to access sql database, create config files in
+    store/[schema]/
 USAGE
     ormgen [options] paths...
 
 OPTIONS
+    -l
+       Set the depth to which relations can be fetched
+
+    -t
+       Select entity type output: protobuf or regular go structs,
+       pass either 'go' for regular structs or 'proto' for protobuf
+
     -o, -output
         Set the name of the generated file. Default is scans.go.
 
@@ -43,63 +53,69 @@ OPTIONS
 
     -h, -help
         Print help and exit.
-
-EXAMPLES
-    tables.go is a file that contains one or more struct declarations.
-
-    Generate scan functions based on structs in tables.go.
-        scaneo tables.go
-
-    Generate scan functions and name the output file funcs.go
-        scaneo -o funcs.go tables.go
-
-    Generate scans.go with unexported functions.
-        scaneo -u tables.go
-
-    Generate scans.go with only struct Post and struct user.
-        scaneo -w "Post,user" tables.go
-
-NOTES
-    Struct field names don't have to match database column names at all.
-    However, the order of the types must match.
-
-    Integrate this with go generate by adding this line to the top of your
-    tables.go file.
-        //go:generate ormgen $GOFILE
 `
-	COLUMN     = "column"
-	TABLE      = "table"
-	FK         = "fk"
-	LINK       = "link"
+	//COLUMN col
+	COLUMN = "column"
+	//TABLE table
+	TABLE = "table"
+	//FK foreign key
+	FK = "fk"
+	//LINK many 2 many next link
+	LINK = "link"
+	//MANYTOMANY relation type
 	MANYTOMANY = "manytomany"
-	ONETOMANY  = "onetomany"
-	MANYTOONE  = "manytoone"
+	//ONETOMANY realtion type
+	ONETOMANY = "onetomany"
+	//MANYTOONE relation type
+	MANYTOONE = "manytoone"
 )
+
+type SQLIndex struct {
+	Unique  bool     `json:"unique"`
+	Columns []string `json:"columns"`
+}
 
 type fieldToken struct {
 	Relation    *relation
-	Name        string
-	Type        string
+	Name        string `json:"name"`
+	Type        string `json:"type"`
 	Slice       bool
-	Column      string
-	Table       string
-	Alias       string
-	Fk          string
-	Link        string
-	LinkAlias   string
-	RelAlias    string
+	Column      string `json:"column"`
+	Table       string `json:"table"`
+	Alias       string `json:"alias"`
+	Fk          string `json:"fk"`
+	Link        string `json:"link"`
+	LinkAlias   string `json:"linkAlias"`
+	RelAlias    string `json:"relAlias"`
 	IsLinkField bool
+	SQLType     string `json:"sqlType"`
+	Primary     bool   `json:"primary"`
+	NotNull     bool   `json:"notNull"`
+	Unique      bool   `json:"unique"`
+	Default     string `json:"default"`
+	Delete      string `json:"delete"`
+	IsInterface bool   `json:"interface"`
+	Lazy        bool   `json:"lazy"`
+	JSON        string `json:"json"`
+	Normalize   bool   `json:"normalize"`
 }
 
 type structToken struct {
-	IdColumn   string
-	Name       string
-	Fields     []*fieldToken
-	Composite  bool
-	Relations  []*relation
-	Table      string
-	Alias      string
-	LinkEntity bool
+	Index        int64         `json:"index"`
+	IDColumn     string        `json:"idColumn"`
+	Name         string        `json:"name"`
+	Fields       []*fieldToken `json:"fields"`
+	Composite    bool
+	relations    []*relation
+	Table        string `json:"table"`
+	Alias        string `json:"alias"`
+	LinkEntity   bool
+	CompositeKey []string `json:"compositeKey"`
+	Schema       string   `json:"schema"`
+	Query        bool     `json:"query"`
+	ChangeSet    []string `json:"changeset"`
+	SQLIndex     SQLIndex
+	Embedded     bool
 }
 
 type context struct {
@@ -139,6 +155,14 @@ type relation struct {
 	IsRoot         bool
 	Fields         []*fieldToken
 	LinkRelation   bool
+	SQLType        string
+	Primary        bool
+	NotNull        bool
+	Unique         bool
+	Default        string
+	Delete         string
+	Lazy           bool
+	JSON           string
 }
 
 func (r *relation) Parent() *relation {
@@ -172,7 +196,11 @@ func (r *relation) IsManyToOne() bool {
 }
 
 func (r *relation) Equals(rel *relation) bool {
-	if r.RelationType == rel.RelationType && r.Type == rel.Type && r.Field == rel.Field && r.Table == rel.Table && rel.FieldName == r.FieldName {
+	if r.RelationType == rel.RelationType &&
+		r.Type == rel.Type &&
+		r.Field == rel.Field &&
+		r.Table == rel.Table &&
+		rel.FieldName == r.FieldName {
 		return true
 	}
 	return false
@@ -181,31 +209,36 @@ func (r *relation) Equals(rel *relation) bool {
 var (
 	inputLevel    int
 	maxLevel      int
-	structLookup  map[string]*structToken
-	linkStructs   map[string]bool = make(map[string]bool, 0)
+	structLookup  = make(map[string]*structToken, 0)
+	linkStructs   = make(map[string]bool, 0)
 	newStructToks []*structToken
 	baseFileName  string
 	packageName   string
 	unExport      bool
+	etype         = "go"
 )
 
 func main() {
 	log.SetFlags(0)
 
 	max := flag.Int("l", 3, "max recursion level")
-	outFilename := flag.String("o", "ormgen", "")
+	cfg := flag.String("c", "json", "configuration type")
+	outFilename := flag.String("o", "gormgen", "")
 	packName := flag.String("p", "current directory", "")
 	unexport := flag.Bool("u", false, "")
 	whitelist := flag.String("w", "", "")
 	version := flag.Bool("v", false, "")
 	help := flag.Bool("h", false, "")
+	otype := flag.String("t", "go", "entity type")
 	flag.IntVar(max, "level", 3, "max recursion level")
+	flag.StringVar(otype, "etype", "go", "")
 	flag.StringVar(outFilename, "output", "ormgen", "")
 	flag.StringVar(packName, "package", "current directory", "")
 	flag.BoolVar(unexport, "unexport", false, "")
 	flag.StringVar(whitelist, "whitelist", "", "")
 	flag.BoolVar(version, "version", false, "")
 	flag.BoolVar(help, "help", false, "")
+	flag.StringVar(cfg, "config", "json", "")
 	flag.Usage = func() { log.Println(usageText) } // call on flag error
 	flag.Parse()
 
@@ -214,14 +247,12 @@ func main() {
 	inputLevel = *max
 
 	if *help {
-		// not an error, send to stdout
-		// that way people can: scaneo -h | less
 		fmt.Println(usageText)
 		return
 	}
 
 	if *version {
-		fmt.Println("ormgen version 0.0.1")
+		fmt.Println("ormgen version 1.0.1")
 		return
 	}
 
@@ -235,43 +266,46 @@ func main() {
 		packageName = *packName
 	}
 
-	files, err := findFiles(flag.Args())
-	if err != nil {
-		log.Println("couldn't find files:", err)
-		log.Fatal(usageText)
-	}
+	etype = *otype
 
-	structToks := make([]*structToken, 0)
-	structLookup = make(map[string]*structToken)
-	for _, file := range files {
-		toks, err := parseCode(file, *whitelist)
+	var structToks []*structToken
+	var err error
+
+	if *cfg == "json" {
+		structToks, err = loadJSON()
 		if err != nil {
-			log.Println(`"syntax error" - parser probably`)
-			log.Fatal(err)
+			log.Fatalf("error loading json config: %s\n", err)
 		}
-
-		structToks = append(structToks, toks...)
+	} else {
+		structToks = loadSource(flag.Args(), *whitelist)
 	}
 
+	generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
+	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
 	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
+	if etype == "go" {
+		generate(inputLevel, structToks, "tmpl/ormentity.tmpl", "entity")
+	} else {
+		generate(inputLevel, structToks, "tmpl/ormproto.tmpl", "proto")
+	}
 
 	for i := 0; i <= inputLevel; i++ {
 		generate(i, structToks, "tmpl/ormlevel.tmpl", "level")
 	}
 }
 
-func generate(mLevel int, structs []*structToken, tmpl, tmplName string) {
-	newStructToks = make([]*structToken, 0)
-	maxLevel = mLevel
-
-	for _, structTk := range structs {
+func generateMetadata(src []*structToken) []*structToken {
+	newStructToks = make([]*structToken, len(src))
+	for i, structTk := range src {
 		newStructTk := &structToken{
-			Name:      structTk.Name,
-			Fields:    make([]*fieldToken, 0),
-			Composite: false,
-			Table:     structTk.Table,
-			Alias:     structTk.Alias,
-			IdColumn:  structTk.IdColumn,
+			Name:         structTk.Name,
+			Fields:       make([]*fieldToken, 0),
+			Composite:    false,
+			Table:        structTk.Table,
+			Alias:        structTk.Alias,
+			IDColumn:     structTk.IDColumn,
+			CompositeKey: structTk.CompositeKey,
+			Schema:       structTk.Schema,
 		}
 		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
@@ -284,16 +318,30 @@ func generate(mLevel int, structs []*structToken, tmpl, tmplName string) {
 			printRelationTree(sep, rel, newStructTk.Relations)
 		}*/
 		proxyfy(newStructTk)
-		newStructToks = append(newStructToks, newStructTk)
+		newStructToks[i] = newStructTk
+	}
+	return newStructToks
+
+}
+
+func generate(mLevel int, data []*structToken, tmpl, tmplName string) {
+	maxLevel = mLevel
+	ext := "go"
+
+	if tmplName == "proto" {
+		ext = "proto"
+	}
+	fileName := fmt.Sprintf("%s_%s_%d.%s", baseFileName, tmplName, mLevel, ext)
+
+	switch tmplName {
+	case "entity":
+	case "changeset":
+	case "proto":
+	default:
+		data = generateMetadata(data)
 	}
 
-	fileName := fmt.Sprintf("%s_%d.go", baseFileName, mLevel)
-
-	if tmplName == "main" {
-		fileName = fmt.Sprintf("%s_main.go", baseFileName)
-	}
-
-	if err := genFile(fileName, newStructToks, mLevel, tmpl, tmplName); err != nil {
+	if err := genFile(fileName, data, mLevel, tmpl, tmplName); err != nil {
 		log.Fatal("couldn't generate file:", err)
 	}
 }
@@ -307,14 +355,33 @@ func printRelationTree(sep string, rel *relation, rels []*relation) {
 	}
 }
 
+func (s *structToken) Relations() []*relation {
+	return s.relations
+}
+
+func (s *structToken) EagerRelations() []*relation {
+	return s.relations
+}
+
 func (s *structToken) RootRelations() []*relation {
 	res := make([]*relation, 0)
-	for _, rel := range s.Relations {
+	for _, rel := range s.relations {
 		if rel.ParentRelation == nil {
 			res = append(res, rel)
 		}
 	}
 	return res
+}
+
+func (s *structToken) IDType() string {
+	for _, f := range s.Fields {
+		if f.Primary {
+			return f.Type
+		} else if f.Name == "ID" {
+			return f.Type
+		}
+	}
+	return ""
 }
 
 func (r *relation) Root() *relation {
@@ -385,9 +452,9 @@ func findRelation(field string, rels []*relation) *relation {
 
 func proxyfyPath(path string, rels []*relation) string {
 	prts := strings.Split(path, ".")
-	edit := make([]string, len(prts))
-	copy(edit, prts)
 	prtsLen := len(prts)
+	edit := make([]string, prtsLen)
+	copy(edit, prts)
 	for i := prtsLen; i >= 0; i-- {
 		var lookup string
 		if i == 0 {
@@ -417,7 +484,7 @@ func proxyfyPath(path string, rels []*relation) string {
 }
 
 func proxyfy(src *structToken) {
-	for s, rel := range src.Relations {
+	for s, rel := range src.relations {
 		if rel.IsManyToMany() || rel.IsOneToMany() {
 			for _, field := range src.Fields {
 				prts := strings.Split(field.Name, ".")
@@ -435,10 +502,10 @@ func proxyfy(src *structToken) {
 				field.Name = strings.Join(prts, ".")
 			}
 		}
-		src.Relations[s].ProxyFieldName = proxyfyPath(src.Relations[s].FieldName, src.Relations)
-		proxyPrts := strings.Split(src.Relations[s].ProxyFieldName, ".")
+		src.relations[s].ProxyFieldName = proxyfyPath(src.relations[s].FieldName, src.relations)
+		proxyPrts := strings.Split(src.relations[s].ProxyFieldName, ".")
 		if strings.HasPrefix(proxyPrts[len(proxyPrts)-1], "proxy") {
-			src.Relations[s].Proxy = true
+			src.relations[s].Proxy = true
 		}
 	}
 }
@@ -450,6 +517,9 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		baseName = ctx.Name
 	}
 	for _, field := range src.Fields {
+		if field.Column == "-" {
+			continue
+		}
 		isSlice, embeddedStruct := isRelation(field)
 		name := field.Name
 		fk := field.Fk
@@ -473,7 +543,11 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		if embeddedStruct == "" {
 			if ctx != nil && ctx.IsLink {
 				if strings.Contains(field.Name, "ID") {
-					continue
+					if field.Name == "ID" {
+						name = baseName + ".LinkID"
+					} else {
+						continue
+					}
 				}
 			}
 			nf := &fieldToken{
@@ -485,6 +559,15 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				Table:    field.Table,
 				Alias:    alias,
 				Fk:       fk,
+				Link:     field.Link,
+				SQLType:  field.SQLType,
+				Primary:  field.Primary,
+				NotNull:  field.NotNull,
+				Unique:   field.Unique,
+				Default:  field.Default,
+				Delete:   field.Delete,
+				Lazy:     field.Lazy,
+				JSON:     field.JSON,
 			}
 			if field.Name == "ID" && ctx != nil {
 				nf.Alias = ctx.Alias
@@ -501,11 +584,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		}
 		//is a relation field
 		res.Composite = true
-		if ctx != nil {
-			if ctx.Level >= maxLevel /*&& !ctx.IsLink*/ {
-				continue
-			}
-		} else if maxLevel == 0 {
+		if (ctx != nil && ctx.Level >= maxLevel /*&& !ctx.IsLink*/) || maxLevel == 0 {
 			continue
 		}
 		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
@@ -518,6 +597,14 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			IsAttribute: false,
 			Owner:       res,
 			FieldName:   name,
+			SQLType:     field.SQLType,
+			Primary:     field.Primary,
+			NotNull:     field.NotNull,
+			Unique:      field.Unique,
+			Default:     field.Default,
+			Delete:      field.Delete,
+			Lazy:        field.Lazy,
+			JSON:        field.JSON,
 		}
 		if pRel != nil {
 			rel.ParentRelation = pRel
@@ -542,29 +629,29 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				linkStructs[linkStruct.Name] = true
 				rel.RelationType = MANYTOMANY
 				rel.LinkAlias = field.LinkAlias
-				rel.From = src.IdColumn
-				rel.LinkTo = emb.IdColumn
+				rel.From = src.IDColumn
+				rel.LinkTo = emb.IDColumn
 				rel.LinkType = field.Link
 				rel.LinkField = field.Link
 				rel.SourceType = src.Name
 				rel.TargetType = emb.Name
 				rel.LinkTable = linkStruct.Table
 				lnCtx.LinkAlias = field.LinkAlias
-				res.Relations = append(res.Relations, rel)
+				res.relations = append(res.relations, rel)
 				parse(res, linkStruct, rel, lnCtx)
 			} else { //onetomany
 				//log.Printf("adding [[ONETOMANY]]: %s \n", field.Name)
-				rel.From = src.IdColumn
+				rel.From = src.IDColumn
 				rel.To = fk
 				rel.RelationType = ONETOMANY
-				res.Relations = append(res.Relations, rel)
+				res.relations = append(res.relations, rel)
 			}
 		} else { // manytoone
 			//log.Printf("adding [[MANYTOONE]]: %s \n", field.Name)
 			rel.From = fk
-			rel.To = emb.IdColumn
+			rel.To = emb.IDColumn
 			rel.RelationType = MANYTOONE
-			res.Relations = append(res.Relations, rel)
+			res.relations = append(res.relations, rel)
 		}
 		parse(res, emb, rel, nCtx)
 	}
@@ -573,8 +660,8 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 var aliases map[string]int
 
 func checkDuplicateAlias(s *structToken) {
-	aliases = make(map[string]int, len(s.Relations)+10)
-	checkAlias(s.Relations)
+	aliases = make(map[string]int, len(s.relations)+10)
+	checkAlias(s.relations)
 }
 
 func checkAlias(rels []*relation) {
@@ -624,8 +711,8 @@ func addRelation(relations []*relation, tpe *relation) []*relation {
 }
 
 func isRelation(ft *fieldToken) (bool, string) {
-	var embeddedStruct string = ""
-	var isSlice bool = false
+	var embeddedStruct string
+	var isSlice = false
 	//var isSlice bool = false
 	if strings.HasPrefix(ft.Type, "*") {
 		embeddedStruct = strings.TrimPrefix(ft.Type, "*")
@@ -681,253 +768,6 @@ func findFiles(paths []string) ([]string, error) {
 	return deduped, nil
 }
 
-func parseCode(source string, commaList string) ([]*structToken, error) {
-	wlist := make(map[string]struct{})
-	if commaList != "" {
-		wSplits := strings.Split(commaList, ",")
-		for _, s := range wSplits {
-			wlist[s] = struct{}{}
-		}
-	}
-
-	structToks := make([]*structToken, 0, 8)
-
-	fset := token.NewFileSet()
-	astf, err := parser.ParseFile(fset, source, nil, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	var filter bool
-	if len(wlist) > 0 {
-		filter = true
-	}
-
-	//ast.Print(fset, astf)
-	for _, decl := range astf.Decls {
-		genDecl, isGeneralDeclaration := decl.(*ast.GenDecl)
-		if !isGeneralDeclaration {
-			continue
-		}
-
-		for _, spec := range genDecl.Specs {
-			typeSpec, isTypeDeclaration := spec.(*ast.TypeSpec)
-			if !isTypeDeclaration {
-				continue
-			}
-
-			structType, isStructTypeDeclaration := typeSpec.Type.(*ast.StructType)
-			if !isStructTypeDeclaration {
-				continue
-			}
-
-			// found a struct in the source code!
-
-			structTok := new(structToken)
-
-			// filter logic
-			if structName := typeSpec.Name.Name; !filter {
-				// no filter, collect everything
-				structTok.Name = structName
-			} else if _, exists := wlist[structName]; filter && !exists {
-				// if structName not in whitelist, continue
-				continue
-			} else if filter && exists {
-				// structName exists in whitelist
-				structTok.Name = structName
-			}
-
-			structTok.Fields = make([]*fieldToken, 0)
-
-			// iterate through struct fields (1 line at a time)
-			for _, fieldLine := range structType.Fields.List {
-				column := columnName(fieldLine.Tag.Value)
-				if column == "-" {
-					continue
-				}
-				if table, tableAlias := tableName(fieldLine.Tag.Value); table != "" {
-					structTok.Table = table
-					structTok.Alias = tableAlias
-				}
-				fieldToks := make([]*fieldToken, len(fieldLine.Names))
-
-				// get field name (or names because multiple vars can be declared in 1 line)
-				for i, fieldName := range fieldLine.Names {
-					fieldToks[i] = new(fieldToken)
-					fieldToks[i].Name = parseIdent(fieldName)
-				}
-
-				var fieldType string
-
-				// get field type
-				switch typeToken := fieldLine.Type.(type) {
-				case *ast.Ident:
-					// simple types, e.g. bool, int
-					fieldType = parseIdent(typeToken)
-				case *ast.SelectorExpr:
-					// struct fields, e.g. time.Time, sql.NullString
-					fieldType = parseSelector(typeToken)
-				case *ast.ArrayType:
-					// arrays
-					fieldType = parseArray(typeToken)
-				case *ast.StarExpr:
-					// pointers
-					fieldType = parseStar(typeToken)
-				}
-
-				if fieldType == "" {
-					continue
-				}
-
-				fk, relAlias := foreignKey(fieldLine.Tag.Value)
-				link, linkAlias := linkTable(fieldLine.Tag.Value)
-				// apply type to all variables declared in this line
-				for i := range fieldToks {
-					fieldToks[i].Type = fieldType
-					fieldToks[i].Table = structTok.Table
-					fieldToks[i].Alias = structTok.Alias
-					if column != "" {
-						fieldToks[i].Column = column
-					}
-					if fk != "" {
-						fieldToks[i].Fk = fk
-						fieldToks[i].Column = fk
-						fieldToks[i].RelAlias = relAlias
-					}
-					if link != "" {
-						fieldToks[i].Link = link
-						fieldToks[i].LinkAlias = linkAlias
-					}
-					if fieldToks[i].Name == "ID" {
-						structTok.IdColumn = fieldToks[i].Column
-					}
-				}
-
-				structTok.Fields = append(structTok.Fields, fieldToks...)
-			}
-
-			structToks = append(structToks, structTok)
-			structLookup[structTok.Name] = structTok
-		}
-	}
-
-	return structToks, nil
-}
-
-func parseIdent(fieldType *ast.Ident) string {
-	// return like byte, string, int
-	return fieldType.Name
-}
-
-func parseSelector(fieldType *ast.SelectorExpr) string {
-	// return like time.Time, sql.NullString
-	ident, isIdent := fieldType.X.(*ast.Ident)
-	if !isIdent {
-		return ""
-	}
-
-	return fmt.Sprintf("%s.%s", parseIdent(ident), fieldType.Sel.Name)
-}
-
-func fieldTags(tag string) [][]string {
-	prts := strings.Split(strings.Replace(strings.Trim(tag, "`\""), "\"", "", -1), " ")
-	tags := make([][]string, 0)
-	if len(prts) > 0 {
-		for _, prt := range prts {
-			sprts := strings.Split(prt, ":")
-			tags = append(tags, sprts)
-		}
-	}
-
-	return tags
-}
-
-//column has only one possible value
-func columnName(tag string) string {
-	values := tagValues(tag, COLUMN)
-	if len(values) > 0 {
-		return values[0]
-	}
-	return ""
-}
-
-//tabletag has 2 mandatory values eg table and alias
-func tableName(tag string) (string, string) {
-	values := tagValues(tag, TABLE)
-	if len(values) > 1 {
-		return values[0], values[1]
-	}
-	return "", ""
-}
-
-func foreignKey(tag string) (string, string) {
-	values := tagValues(tag, FK)
-	if len(values) > 1 {
-		return values[0], values[1]
-
-	}
-	return "", ""
-}
-
-func linkTable(tag string) (string, string) {
-	values := tagValues(tag, LINK)
-	if len(values) > 1 {
-		return values[0], values[1]
-	}
-	return "", ""
-}
-
-func tagValues(tag string, prop string) []string {
-	tags := fieldTags(tag)
-	for _, tag := range tags {
-		if tag[0] == prop {
-			values := strings.Split(tag[1], ",")
-			return values
-		}
-	}
-	return []string{}
-}
-
-func parseArray(fieldType *ast.ArrayType) string {
-	// return like []byte, []time.Time, []*byte, []*sql.NullString
-	var arrayType string
-
-	switch typeToken := fieldType.Elt.(type) {
-	case *ast.Ident:
-		arrayType = parseIdent(typeToken)
-	case *ast.SelectorExpr:
-		arrayType = parseSelector(typeToken)
-	case *ast.StarExpr:
-		arrayType = parseStar(typeToken)
-	}
-
-	if arrayType == "" {
-		return ""
-	}
-
-	return fmt.Sprintf("[]%s", arrayType)
-}
-
-func parseStar(fieldType *ast.StarExpr) string {
-	// return like *bool, *time.Time, *[]byte, and other array stuff
-	var starType string
-
-	switch typeToken := fieldType.X.(type) {
-	case *ast.Ident:
-		starType = parseIdent(typeToken)
-	case *ast.SelectorExpr:
-		starType = parseSelector(typeToken)
-	case *ast.ArrayType:
-		starType = parseArray(typeToken)
-	}
-
-	if starType == "" {
-		return ""
-	}
-
-	return fmt.Sprintf("*%s", starType)
-}
-
 func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string) error {
 	if len(toks) < 1 {
 		return errors.New("no structs found")
@@ -946,6 +786,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Level       int
 		Levels      []int
 		AtMaxLevel  bool
+		Etype       string
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
@@ -953,6 +794,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Level:       lvl,
 		Levels:      make([]int, lvl+1),
 		AtMaxLevel:  lvl == inputLevel,
+		Etype:       etype,
 	}
 
 	if unExport {
