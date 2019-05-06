@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 )
@@ -657,6 +658,12 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 	}
 }
 
+type ByFieldNameLength []*relation
+
+func (rs ByFieldNameLength) Len() int           { return len(rs) }
+func (rs ByFieldNameLength) Swap(i, j int)      { rs[i], rs[j] = rs[j], rs[i] }
+func (rs ByFieldNameLength) Less(i, j int) bool { return len(rs[i].FieldName) < len(rs[j].FieldName) }
+
 var aliases map[string]int
 
 func checkDuplicateAlias(s *structToken) {
@@ -665,7 +672,10 @@ func checkDuplicateAlias(s *structToken) {
 }
 
 func checkAlias(rels []*relation) {
-	for _, rel := range rels {
+	cpRels := make([]*relation, len(rels))
+	copy(cpRels, rels)
+	sort.Sort(ByFieldNameLength(cpRels))
+	for _, rel := range cpRels {
 		if rel.Alias == "" {
 			continue
 		}
