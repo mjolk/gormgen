@@ -166,7 +166,8 @@ func (q *{{.Name}}Query) OrderBy(prop, dir string) *{{.Name}}Query {
 }
 
 func (q *{{.Name}}Query) Limit(count int) *{{.Name}}Query {
-	q.query = fmt.Sprintf("%s LIMIT $p", q.query, count)
+	q.params = append(q.params, count)
+	q.query = fmt.Sprintf("%s LIMIT $p", q.query)
 	return q
 }
 
