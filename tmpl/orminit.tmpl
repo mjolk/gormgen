@@ -9,32 +9,29 @@ const ( {{range .Tokens}} {{$natfields := ffilterslice .Fields}}{{$nlen := len $
 	  {{if .Relation}}{{template "relation" .}}{{else }}{{.Column}} {{.SQLType}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if .Primary }} primary key{{else}}{{if .Delete}} on delete {{.Delete}}{{end}}{{if .Unique}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
 	  primary key({{range $fii, $ckd := .CompositeKey}}{{if $fii}},{{end}}{{.}}{{end}}){{end}}
 	);`
-{{end}}
+{{if hassqlindexes .}} {{$table := .Table}}
+{{range .SQLIndex}}
+{{.Name}}Index = `
+create {{if .Unique}}unique {{end}}index on {{$table}} ({{range $idx, $c := .Columns}}{{if $idx}},{{end}}{{.}}{{end}})
+`{{end}}{{end}}{{end}}
 )
 
-{{range .Tokens}}
-func create{{.Name}}Table(schema string) string {
-	return fmt.Sprintf({{.Name}}Table, schema)
-}{{end}}
-
-type createTable func (id string) string
-
-var tables = map[string]createTable{ {{range .Tokens}}
-	"{{.Name}}": create{{.Name}}Table,{{end}}
+var tables = []string{ {{range .Tokens}}
+	{{.Name}}Table,{{end}}
 }
 
+var indexes = []string{ {{range .Tokens}}{{if hassqlindexes .}}{{range .SQLIndex}}
+	{{.Name}}Index,{{end}}{{end}}{{end}}
+}
+
+//TODO enable whitelisting
 func New(schema string, st []string) []string {
-	var tstrings []string
-	if len(st) > 0 {
-		for _, t := range st {
-			if create, ok := tables[t]; ok {
-				tstrings = append(tstrings, create(schema))
-			}
-		}
-		return tstrings
+	tstrings := make([]string, len(tables)+len(indexes))
+	for i, table := range tables {
+		tstrings[i] = fmt.Sprintf(table, schema)
 	}
-	for _, create := range tables {
-		tstrings = append(tstrings, create(schema))
+	for j, index := range indexes {
+		tstrings[len(tables) + j] = index
 	}
 	return tstrings
 }

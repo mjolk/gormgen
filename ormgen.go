@@ -72,6 +72,7 @@ OPTIONS
 )
 
 type SQLIndex struct {
+	Name    string   `json:"name"`
 	Unique  bool     `json:"unique"`
 	Columns []string `json:"columns"`
 }
@@ -111,11 +112,11 @@ type structToken struct {
 	Table        string `json:"table"`
 	Alias        string `json:"alias"`
 	LinkEntity   bool
-	CompositeKey []string `json:"compositeKey"`
-	Schema       string   `json:"schema"`
-	Query        bool     `json:"query"`
-	ChangeSet    []string `json:"changeset"`
-	SQLIndex     SQLIndex
+	CompositeKey []string   `json:"compositeKey"`
+	Schema       string     `json:"schema"`
+	Query        bool       `json:"query"`
+	ChangeSet    []string   `json:"changeset"`
+	SQLIndex     []SQLIndex `json:"indexes"`
 	Embedded     bool
 }
 
@@ -307,6 +308,7 @@ func generateMetadata(src []*structToken) []*structToken {
 			IDColumn:     structTk.IDColumn,
 			CompositeKey: structTk.CompositeKey,
 			Schema:       structTk.Schema,
+			SQLIndex:     structTk.SQLIndex,
 		}
 		parse(newStructTk, structTk, nil, nil)
 		checkDuplicateAlias(newStructTk)
@@ -549,6 +551,12 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 					} else {
 						continue
 					}
+				}
+				switch field.Name {
+				case "Updated":
+					name = baseName + ".LinkUpdated"
+				case "Version":
+					name = baseName + ".LinkVersion"
 				}
 			}
 			nf := &fieldToken{

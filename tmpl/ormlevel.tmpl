@@ -42,6 +42,7 @@ func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Na
 
 func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{.Name}}, error) {
 	var err error
+	defer rs.Close()	
 	result := make([]*{{.Name}}, 0)
 	for rs.Next() {
 		dest := []interface{}{ {{range .Fields}}
@@ -68,6 +69,9 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
                 if newID {
 			result = append(result, entity)
 		}
+	}
+	if cErr := rs.Close(); cErr != nil {
+		return nil, cErr
 	}
 	if err = rs.Err(); err != nil {
 		return nil, err

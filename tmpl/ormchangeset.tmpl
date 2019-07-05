@@ -11,6 +11,8 @@ import (
 	"bytes"
 )
 
+var VersionError = fmt.Errorf("version mismatch, object already newer version")
+
 {{range .Tokens}}{{$curname := .Name}}{{if islinked .}}
 func(e *{{$curname}}) Id() int64 {
 	if e.LinkID > 0 {
@@ -55,18 +57,38 @@ func (e *{{.Name}}) GetVersion() int64 {
 	return e.Version
 }
 
-func (e *{{$curname}}) VersionCheck(update *{{$curname}}) error {
-	update.Version++
-	if e.Version >= update.Version {
-		return fmt.Errorf("version mismatch, object already newer version")
-	}
+func (e *{{.Name}}) SetVersion() {
+	e.Version++
+}
+
+func (e *{{.Name}}) GetUpdated() time.Time {
+	return e.Updated
+}
+
+func (e *{{.Name}}) SetUpdated() {
 	e.Updated = time.Now().UTC()
+}
+
+func (e *{{$curname}}) VersionCheck(update Entity) error {
+	update.SetVersion()
+	if e.GetVersion() >= update.GetVersion() {
+		return VersionError
+	}
+	e.SetUpdated()
 	return nil
 }
 {{else}}
 func (e *{{.Name}}) GetVersion() int64 {
 	return 0
 }
+
+func (e *{{.Name}}) SetVersion() {}
+
+func (e *{{.Name}}) GetUpdated() time.Time {
+	return time.Time{}
+}
+
+func (e *{{.Name}}) SetUpdated() {}
 {{end}}
 {{range .Fields}}{{if eq .Name "Attributes"}}
 func (e *{{$curname}}) Attr() []*Attribute {

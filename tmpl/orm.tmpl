@@ -78,16 +78,6 @@ type Query interface {
 {{$levels := .Levels}}
 
 {{range .Tokens}}
-
-//postgresql specific shit
-func {{.Name}}LastInsertID(ctx SQLContext) (int64, error) {
-       	var nId int64
-       	if err := ctx.QueryRow("select currval('{{tolower .Table}}_{{tolower .IDColumn}}_seq')").Scan(&nId); err != nil {
-               	return 0, err
-       	}
-       	return nId, nil
-}
-
 type proxy{{.Name}} struct {
 	*{{.Name}}{{range .RootRelations}}
 	proxy{{.Field}} *proxy{{.Type}}{{end}}{{range proxysubrels .Name}}
@@ -126,6 +116,14 @@ func New{{.Name}}Query(lvl int) *{{.Name}}Query {
 			query:fmt.Sprintf("%s %s", {{.Name}}Select(lvl), {{.Name}}From(lvl)), 
 			params:make([]interface{}, 0),
 			depth: lvl,
+		}
+}
+
+func Delete{{.Name}}Query(lvl int) *{{.Name}}Query {
+	return &{{.Name}}Query{
+		query:fmt.Sprintf("DELETE %s", {{.Name}}From(lvl)),
+		params:make([]interface{}, 0),
+		depth: lvl,
 		}
 }
 
@@ -223,6 +221,77 @@ func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
 	_, err = ctx.Exec("DELETE FROM {{.Table}} WHERE {{.IDColumn}} = $1", entity.ID)
 	return
 }
+
+func Insert{{title .Name}}(ctx SQLContext, entity ...*{{.Name}}) ([]interface{} , error) {
+	return insert{{title .Name}}(ctx, "", entity...)
+}
+
+func Upsert{{title .Name}}(ctx SQLContext,  on string, entity ...*{{.Name}}) ([]interface{}, error) {
+	return insert{{title .Name}}(ctx, on, entity...)
+}
+
+
+func insert{{title .Name}}(ctx SQLContext, on string, entities ...*{{.Name}}) ([]interface{}, error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
+	eCount := len(entities)
+	returnIds := make([]interface{}, eCount)	
+	if eCount == 0 {
+		return returnIds, nil
+	}
+	{{$len := len $natfields}}vQuery := make([]string, eCount)
+	values := make([]interface{}, 0)
+	for i, entity := range entities {
+	tv := make([]interface{}, {{$len}})	{{range $fi, $fld := $natfields}}{{if isreference .}}
+	if entity.{{referenceonly .Name}} == nil {
+		tv[{{$fi}}] = nil
+	} else {
+		tv[{{$fi}}] = entity.{{.Name}}
+	}{{else}}
+	tv[{{$fi}}] = entity.{{.Name}}{{end}}{{end}}
+	values = append(values, tv...)
+	holders := make([]interface{}, {{$len}})
+	for f := 0;f < {{$len}};f++{
+		holders[f] = (f+1)+(i*{{$len}})
+	}
+	vQuery[i] = fmt.Sprintf(`({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}$%d{{end}})`, holders...)
+	} 
+	query := `INSERT INTO {{.Table}}`
+	if len(values) == 0 {
+		 query = fmt.Sprintf("%s DEFAULT VALUES", query)
+	} else {
+		query = fmt.Sprintf(`%s ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES %s`, query, strings.Join(vQuery, ", "))
+	}
+	if on != "" {
+		query = fmt.Sprintf("%s ON CONFLICT %s", query, on)
+	}
+	query = fmt.Sprintf("%s RETURNING {{.IDColumn}}", query)
+	if(eCount == 1){
+		if err := ctx.QueryRow(query, values...).Scan(&returnIds[0]); err != nil {
+			return returnIds, err
+		}
+		return returnIds, nil
+		
+	} else {
+		rows, err := ctx.Query(query, values...)
+		if err != nil {
+			return returnIds, err
+		}
+		defer rows.Close()
+		cnt := 0
+		for rows.Next() {
+			if err = rows.Scan(&returnIds[cnt]); err != nil {
+				return returnIds, err
+			}
+			cnt++
+		}
+		if cErr := rows.Close(); cErr != nil {
+			return returnIds, cErr
+		}
+		if err := rows.Err(); err != nil {
+			return returnIds, err
+		}
+	}
+	return returnIds, nil
+}
 {{/*{{else}}//hack - need to check if this is a good permanent solution and not only for this schema
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}
 	queryWhere := `WHERE {{range $fi, $fld := $natfields}}{{if $fi}} AND {{end}}{{.Column}} = ${{plus1 $fi}}{{end}}`
@@ -277,56 +346,23 @@ func {{.Name}}From(lvl int) string {
 	return {{.Name}}Froms[lvl]()
 }
 
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) {
-	err = insert{{title .Name}}(entity, ctx, "")
-	return
-}
-
-func Upsert{{title .Name}}(entity *{{.Name}}, ctx SQLContext, on string) (err error) {
-	err = insert{{title .Name}}(entity, ctx, on)
-	return
-}
-
-func insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext, on string) (err error) { {{$sfields := .Fields}} {{$owner := .Name}}{{$relations := .Relations}}{{$natfields := ffiltersliceandid .Fields}}
-	var query string
-	values := make([]interface{}, 0){{range $natfields}}{{if isreference .}}
-	if entity.{{referenceonly .Name}} == nil {
-		values = append(values, nil)
-	} else {
-		values = append(values, entity.{{.Name}})
-	}{{else}}
-	values = append(values, entity.{{.Name}}){{end}}{{end}}
-	if len(values) == 0 {
-		query = `INSERT INTO {{.Table}} DEFAULT VALUES`
-	} else if entity.ID == {{if eq "uuid.UUID" (lookupidtype .Name)}}uuid.Nil{{else}}0{{end}} {
-		query = `INSERT INTO {{.Table}} ({{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES({{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus1 $idx}}{{end}})`
-	} else {
-		values = append([]interface{}{entity.ID}, values...)
-		query = `INSERT INTO {{.Table}} ({{.IDColumn}}, {{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{switch2fk .}}{{end}}) VALUES($1, {{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{plus2 $idx}}{{end}})`
-	}
-	if on != "" {
-		query = fmt.Sprintf("%s ON CONFLICT %s", query, on)
-	}
-	_, err = ctx.Exec(query, values...)
-	return
-}
 
 func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffiltersliceandid .Fields}}
 	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
 		return fmt.Errorf("Cannot update without entity identifier %s on %s", "Update", "{{.Name}}")
 	}{{$l := len $natfields}}
-	queryPrts := make([]string, 0)
-	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}{{if isreference .}}
+	queryPrts := make([]string, {{$l}})
+	updateFields := make([]interface{}, {{$l}}+1){{range $fi, $fld := $natfields}}{{if isreference .}}
 	if entity.{{referenceonly .Name}} == nil || entity.{{.Name}} == {{if eq .Type "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
-		updateFields = append(updateFields, nil)
+		updateFields[{{$fi}}] = nil
 	} else {
-		updateFields = append(updateFields, entity.{{.Name}})
+		updateFields[{{$fi}}] = entity.{{.Name}}
 	}{{else}}
-	updateFields = append(updateFields, entity.{{.Name}}){{end}}
-	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
+	updateFields[{{$fi}}] = entity.{{.Name}}{{end}}
+	queryPrts[{{$fi}}] = `{{switch2fk .}} = ${{plus1 $fi}}`{{end}}
 	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
 	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
-	updateFields = append(updateFields, entity.ID)
+	updateFields[{{$l}}] = entity.ID
 	query := `UPDATE {{.Table}} ` + queryStr
 	_, err = ctx.Exec(query, updateFields...)
 	return
@@ -346,24 +382,18 @@ func Update{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$n
 	if entity.ID == {{if eq .IDType "uuid.UUID"}}uuid.Nil{{else}}0{{end}} {
 		return fmt.Errorf("Cannot update without entity identifier %s on %s", "Update", "{{.Name}}")
 	}{{$l := len $natfields}}
-	queryPrts := make([]string, 0)
-	updateFields := make([]interface{}, 0){{range $fi, $fld := $natfields}}
-	updateFields = append(updateFields, entity.{{.Name}})
-	queryPrts = append(queryPrts, `{{switch2fk .}} = ${{plus1 $fi}}`){{end}}
+	queryPrts := make([]string, {{$l}})
+	updateFields := make([]interface{}, {{$l}}+1){{range $fi, $fld := $natfields}}
+	updateFields[{{$fi}}] = entity.{{.Name}}
+	queryPrts[{{$fi}}] = `{{switch2fk .}} = ${{plus1 $fi}}`{{end}}
 	//queryStr := strings.Join(queryPrts, ", ") + ` WHERE {{.IDColumn}} = ${{plus1 $l}}`
 	queryStr := fmt.Sprintf("SET %s WHERE {{.IDColumn}} = ${{plus1 $l}}", strings.Join(queryPrts, ", "))
-	updateFields = append(updateFields, entity.ID)
+	updateFields[{{$l}}] = entity.ID
 	_, err = ctx.Exec(`UPDATE {{.Table}} ` + queryStr, updateFields...)
 	return
 }
 {{end}}
 
-
-func Insert{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}} {{$uuid := eq .IDType "uuid.UUID"}}
-query := `INSERT INTO {{.Table}} ({{if $uuid}}{{.IDColumn}}, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}{{.Column}}{{end}}) VALUES({{if $uuid}}$1, {{end}}{{range $idx, $fldx := $natfields}}{{if $idx}}, {{end}}${{if $uuid}}{{plus2 $idx}}{{else}}{{plus1 $idx}}{{end}}{{end}})`
-	_, err = ctx.Exec(query, {{if $uuid}}entity.ID, {{end}}{{range $fi, $fld := $natfields}}{{if $fi}}, {{end}}entity.{{.Name}}{{end}})
-	return
-}
 
 func Query{{title .Name}}(query string, params []interface{}, lvl int, ctx SQLContext) (*{{.Name}}, error) {
 	return Load{{title .Name}}(ctx.QueryRow(query, params...))
@@ -388,6 +418,7 @@ func {{$.Visibility}}oad{{title .Name}}(r *sql.Row) (*{{.Name}}, error) {
 }
 
 func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
+	defer rs.Close()
 	structs := make([]*{{.Name}}, 0, 16)
 	var err error
 	for rs.Next() {
@@ -398,6 +429,9 @@ func {{$.Visibility}}oad{{title .Name}}s(rs *sql.Rows) ([]*{{.Name}}, error) {
 			return nil, err
 		}
 		structs = append(structs, &s)
+	}
+	if cErr := rs.Close(); cErr != nil {
+		return nil, cErr
 	}
 	if err = rs.Err(); err != nil {
 		return nil, err

@@ -87,6 +87,7 @@ var (
 		"isidfield":         IsIDField,
 		"versioned":         Versioned,
 		"islinked":          LinkedEntity,
+		"hassqlindexes":     HasSQLIndexes,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -97,6 +98,10 @@ var (
 			return x - 1
 		}}
 )
+
+func HasSQLIndexes(token *structToken) bool {
+	return len(token.SQLIndex) > 0
+}
 
 func LinkedEntity(token *structToken) bool {
 	for _, f := range token.Fields {
