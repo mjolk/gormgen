@@ -1,13 +1,60 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 )
+
+func findFiles(paths []string) ([]string, error) {
+	if len(paths) < 1 {
+		return nil, errors.New("no starting paths")
+	}
+
+	// using map to prevent duplicate file path entries
+	// in case the user accidently passes the same file path more than once
+	// probably because of autocomplete
+	files := make(map[string]struct{})
+
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+
+		if !info.IsDir() {
+			// add file path to files
+			files[path] = struct{}{}
+			continue
+		}
+
+		filepath.Walk(path, func(fp string, fi os.FileInfo, _ error) error {
+			if fi.IsDir() {
+				// will still enter directory
+				return nil
+			} else if fi.Name()[0] == '.' {
+				return nil
+			}
+
+			// add file path to files
+			files[fp] = struct{}{}
+			return nil
+		})
+	}
+
+	deduped := make([]string, 0, len(files))
+	for f := range files {
+		deduped = append(deduped, f)
+	}
+
+	return deduped, nil
+}
 
 func loadSource(paths []string, wlist string) []*structToken {
 	files, err := findFiles(paths)

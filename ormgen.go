@@ -35,19 +35,14 @@ OPTIONS
        Select entity type output: protobuf or regular go structs,
        pass either 'go' for regular structs or 'proto' for protobuf
 
-    -o, -output
-        Set the name of the generated file. Default is scans.go.
+    -d 
+      Select sql dialect, mysql, postgresql, cockroachdb
 
-    -p, -package
-        Set the package name for the generated file. Default is current
-        directory name.
+    -change
+      Enable changeset event extensions
 
-    -u, -unexport
-        Generate unexported functions. Default is export all.
-
-    -w, -whitelist
-        Only include structs specified in case-sensitive, comma-delimited
-        string.
+    -attr
+      Enable attribute extension
 
     -v, -version
         Print version and exit.
@@ -216,36 +211,36 @@ var (
 	newStructToks []*structToken
 	baseFileName  string
 	packageName   string
-	unExport      bool
 	etype         = "go"
+	changeSet     = false
+	dialect       = "postgresql"
+	attributes    = false
 )
 
 func main() {
 	log.SetFlags(0)
 
 	max := flag.Int("l", 3, "max recursion level")
-	cfg := flag.String("c", "json", "configuration type")
 	outFilename := flag.String("o", "gormgen", "")
-	packName := flag.String("p", "current directory", "")
-	unexport := flag.Bool("u", false, "")
-	whitelist := flag.String("w", "", "")
 	version := flag.Bool("v", false, "")
 	help := flag.Bool("h", false, "")
 	otype := flag.String("t", "go", "entity type")
+	ch := flag.Bool("change", false, "generate change event system")
+	d := flag.String("d", "postgresql", "select sql dialect")
+	attr := flag.Bool("attr", false, "enable attributes")
 	flag.IntVar(max, "level", 3, "max recursion level")
 	flag.StringVar(otype, "etype", "go", "")
 	flag.StringVar(outFilename, "output", "ormgen", "")
-	flag.StringVar(packName, "package", "current directory", "")
-	flag.BoolVar(unexport, "unexport", false, "")
-	flag.StringVar(whitelist, "whitelist", "", "")
 	flag.BoolVar(version, "version", false, "")
 	flag.BoolVar(help, "help", false, "")
-	flag.StringVar(cfg, "config", "json", "")
 	flag.Usage = func() { log.Println(usageText) } // call on flag error
 	flag.Parse()
 
+	changeSet = *ch
+	dialect = *d
+	attributes = *attr
+
 	baseFileName = *outFilename
-	unExport = *unexport
 	inputLevel = *max
 
 	if *help {
@@ -258,31 +253,25 @@ func main() {
 		return
 	}
 
-	if *packName == "current directory" {
-		wd, err := os.Getwd()
-		if err != nil {
-			log.Fatal("couldn't get working directory:", err)
-		}
-
-		*packName = filepath.Base(wd)
-		packageName = *packName
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Fatal("couldn't get working directory:", err)
 	}
+
+	packageName = filepath.Base(wd)
 
 	etype = *otype
 
 	var structToks []*structToken
-	var err error
 
-	if *cfg == "json" {
-		structToks, err = loadJSON()
-		if err != nil {
-			log.Fatalf("error loading json config: %s\n", err)
-		}
-	} else {
-		structToks = loadSource(flag.Args(), *whitelist)
+	structToks, err = loadJSON()
+	if err != nil {
+		log.Fatalf("error loading json config: %s\n", err)
 	}
 
-	generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
+	if *ch {
+		generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
+	}
 	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
 	generate(inputLevel, structToks, "tmpl/orm.tmpl", "main")
 	if etype == "go" {
@@ -742,50 +731,6 @@ func isRelation(ft *fieldToken) (bool, string) {
 	return isSlice, embeddedStruct
 }
 
-func findFiles(paths []string) ([]string, error) {
-	if len(paths) < 1 {
-		return nil, errors.New("no starting paths")
-	}
-
-	// using map to prevent duplicate file path entries
-	// in case the user accidently passes the same file path more than once
-	// probably because of autocomplete
-	files := make(map[string]struct{})
-
-	for _, path := range paths {
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-
-		if !info.IsDir() {
-			// add file path to files
-			files[path] = struct{}{}
-			continue
-		}
-
-		filepath.Walk(path, func(fp string, fi os.FileInfo, _ error) error {
-			if fi.IsDir() {
-				// will still enter directory
-				return nil
-			} else if fi.Name()[0] == '.' {
-				return nil
-			}
-
-			// add file path to files
-			files[fp] = struct{}{}
-			return nil
-		})
-	}
-
-	deduped := make([]string, 0, len(files))
-	for f := range files {
-		deduped = append(deduped, f)
-	}
-
-	return deduped, nil
-}
-
 func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string) error {
 	if len(toks) < 1 {
 		return errors.New("no structs found")
@@ -805,6 +750,8 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Levels      []int
 		AtMaxLevel  bool
 		Etype       string
+		Dialect     string
+		Attributes  bool
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
@@ -813,11 +760,8 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Levels:      make([]int, lvl+1),
 		AtMaxLevel:  lvl == inputLevel,
 		Etype:       etype,
-	}
-
-	if unExport {
-		// func name will be scanFoo instead of ScanFoo
-		data.Visibility = "l"
+		Dialect:     dialect,
+		Attributes:  attributes,
 	}
 
 	mTmpl, err := Asset(tmpl)

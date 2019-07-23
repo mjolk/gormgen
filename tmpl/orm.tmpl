@@ -2,9 +2,13 @@
 package {{.PackageName}}
 
 {{$proto := eq $.Etype "proto"}}
+{{$psql := psql $.Dialect}}
+{{$mysql := msql $.Dialect}}
+{{$csql := csql $.Dialect}}
 import (
-	"database/sql"
-	"github.com/lib/pq" {{if $proto}}
+	"database/sql" {{if or $csql $psql}}
+	"github.com/lib/pq" {{else}}
+	"github.com/go-sql-driver/mysql"{{end}}{{if $proto}}
 	"gitlab.com/astrotit/registration-api/uuid" {{else}}
 	"github.com/gofrs/uuid"{{end}}
 	"strings"
@@ -46,7 +50,7 @@ func checkSqlBoolValue(v interface{}) bool {
 }
 
 func checkSqlTimeValue(v interface{}) time.Time {
-	val := v.(*pq.NullTime)
+	val := v.({{if or $psql $csql}}*pq.NullTime{{else}}*mysql.NullTime{{end}})
 	if !val.Valid {
 		return time.Time{}
 	}
@@ -263,7 +267,7 @@ func insert{{title .Name}}(ctx SQLContext, on string, entities ...*{{.Name}}) ([
 	if on != "" {
 		query = fmt.Sprintf("%s ON CONFLICT %s", query, on)
 	}
-	query = fmt.Sprintf("%s RETURNING {{.IDColumn}}", query)
+	{{if or psql csql}}query = fmt.Sprintf("%s RETURNING {{.IDColumn}}", query)
 	if(eCount == 1){
 		if err := ctx.QueryRow(query, values...).Scan(&returnIds[0]); err != nil {
 			return returnIds, err
@@ -291,6 +295,9 @@ func insert{{title .Name}}(ctx SQLContext, on string, entities ...*{{.Name}}) ([
 		}
 	}
 	return returnIds, nil
+	{{else}}
+	return ctx.Exec(query, values...)
+	{{end}}
 }
 {{/*{{else}}//hack - need to check if this is a good permanent solution and not only for this schema
 func Delete{{title .Name}}(entity *{{.Name}}, ctx SQLContext) (err error) { {{$natfields := ffilternatid .Fields}}

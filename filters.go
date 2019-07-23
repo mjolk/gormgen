@@ -9,7 +9,8 @@ import (
 )
 
 var (
-	fMap template.FuncMap = template.FuncMap{"title": strings.Title,
+	fMap template.FuncMap = template.FuncMap{
+		"title": strings.Title,
 		"isint": func(tpe string) bool {
 			if tpe == "int64" {
 				return true
@@ -96,8 +97,32 @@ var (
 		},
 		"min1": func(x int) int {
 			return x - 1
-		}}
+		},
+		"psql":      IsPql,
+		"msql":      IsMysql,
+		"csql":      IsCockroach,
+		"setschema": SetSchema,
+	}
 )
+
+func SetSchema(dialect string) string {
+	if dialect == "postgresql" {
+		return "%[1]s."
+	}
+	return ""
+}
+
+func IsPql(dialect string) bool {
+	return dialect == "postgresql"
+}
+
+func IsMysql(dialect string) bool {
+	return dialect == "mysql"
+}
+
+func IsCockroach(dialect string) bool {
+	return dialect == "cockroachdb"
+}
 
 func HasSQLIndexes(token *structToken) bool {
 	return len(token.SQLIndex) > 0
