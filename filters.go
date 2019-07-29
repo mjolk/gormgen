@@ -102,8 +102,18 @@ var (
 		"msql":      IsMysql,
 		"csql":      IsCockroach,
 		"setschema": SetSchema,
+		"efields":   EmbedFields,
 	}
 )
+
+type EFieldsArgs struct {
+	Token *structToken
+	Field *fieldToken
+}
+
+func EmbedFields(t *structToken, f *fieldToken) EFieldsArgs {
+	return EFieldsArgs{t, f}
+}
 
 func SetSchema(dialect string) string {
 	if dialect == "postgresql" {

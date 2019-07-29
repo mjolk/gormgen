@@ -12,6 +12,7 @@ import (
 	"log"
 	"time"
 	"strings"
+	"os"
 
 	uuid "github.com/gofrs/uuid" {{if or $psql $csql}}
 	_ "github.com/lib/pq" //import pq driver{{else}}
@@ -25,6 +26,15 @@ type dbConfig struct {
 	Dbuser   string
 	Password string
 	Parameters []string
+	Schema string
+}
+
+func (cfg dbConfig) parameters() string {
+	parameters := ""
+	if len(dbConfig.Parameters) > 0 {
+		parameters += "?" + strings.Join(dbConfig.Parameters, "&")
+	}
+	return parameters
 }
 
 /*func (cfg dbConfig) Connect(ctx context.Context) (sql.Conn, error) {
@@ -139,8 +149,7 @@ var dbio *sql.DB
 // Dbase database io handle
 func Dbase() *sql.DB {
 	if dbio == nil {
-		cfg := loadConfig()
-		openConnection(cfg)
+		openConnection()
 	}
 	return dbio
 }
@@ -148,25 +157,20 @@ func Dbase() *sql.DB {
 func openConnection(dbconfig dbConfig) {
 	log.Printf(
 		"user=%s dbname=%s host=%s sslmode=disable",
-		dbconfig.Dbuser,
-		dbconfig.Db,
-		dbconfig.Host,
-		dbConfig.Parameters,
+		cfg.Dbuser,
+		cfg.Db,
+		cfg.Host
 	)
-	parameters := ""
-	if len(dbConfig.Parameters) > 0 {
-		parameters += "?" + strings.Join(dbConfig.Parameters, "&")
-	}
 	var err error
 	dbio, err = sql.Open(
 		{{if or $psql $csql}}"postgres"{{else}}"mysql"{{end}},
 		fmt.Sprintf(
 			"{{if or $psql $csql}}postgres://{{end}}%s:%s@%s/%s%s",
-			dbconfig.Dbuser,
-			dbconfig.Password,
-			dbconfig.Host,
-			dbconfig.Db,
-			parameters,
+			cfg.Dbuser,
+			cfg.Password,
+			cfg.Host,
+			cfg.Db,
+			cfg.parameters(),
 		),
 	)
 	if err != nil {
@@ -200,12 +204,21 @@ func Transact(ctx SQLContext, txFunc func(SQLContext) error) (err error) {
 	return txFunc(ctx)
 }
 
+func configValue(key string) string {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		panic(fmt.Sprintf("No value for key: %s \n", key))
+	}
+	return val
+}
+
 func loadConfig() dbConfig {
-	cfg := dbConfig{}
-	cfg.Host = net.ConfigValue("DBHOST")
-	cfg.Dbuser = net.ConfigValue("DBUSER")
-	cfg.Password = net.ConfigValue("DBPASSWORD")
-	cfg.Db = net.ConfigValue("DB")
+	cfg = dbConfig{}
+	cfg.Host = configValue("DBHOST")
+	cfg.Dbuser = configValue("DBUSER")
+	cfg.Password = configValue("DBPASSWORD")
+	cfg.Db = configValue("DB")
+	{{if or $msql $csql}}cfg.Schema = cfg.Db{{else}}cfg.Schema = configValue("SCHEMA"){{end}}
 	return cfg
 }
 {{end}}

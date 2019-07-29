@@ -39,7 +39,7 @@ OPTIONS
       Select sql dialect, mysql, postgresql, cockroachdb
 
     -change
-      Enable changeset event extensions
+      Enable changefeed event extensions
 
     -attr
       Enable attribute extension
@@ -95,6 +95,7 @@ type fieldToken struct {
 	Lazy        bool   `json:"lazy"`
 	JSON        string `json:"json"`
 	Normalize   bool   `json:"normalize"`
+	Embedded    bool
 }
 
 type structToken struct {
@@ -112,7 +113,7 @@ type structToken struct {
 	Query        bool       `json:"query"`
 	ChangeSet    []string   `json:"changeset"`
 	SQLIndex     []SQLIndex `json:"indexes"`
-	Embedded     bool
+	Embedded     bool       `json:"embedded"`
 }
 
 type context struct {
@@ -124,6 +125,7 @@ type context struct {
 	Link      string
 	Alias     string
 	Fk        string
+	Embedded  bool
 }
 
 type relation struct {
@@ -160,6 +162,7 @@ type relation struct {
 	Delete         string
 	Lazy           bool
 	JSON           string
+	Embedded       bool
 }
 
 func (r *relation) Parent() *relation {
@@ -212,7 +215,7 @@ var (
 	baseFileName  string
 	packageName   string
 	etype         = "go"
-	changeSet     = false
+	changeFeed    = false
 	dialect       = "postgresql"
 	attributes    = false
 )
@@ -236,7 +239,7 @@ func main() {
 	flag.Usage = func() { log.Println(usageText) } // call on flag error
 	flag.Parse()
 
-	changeSet = *ch
+	changeFeed = *ch
 	dialect = *d
 	attributes = *attr
 
@@ -269,7 +272,9 @@ func main() {
 		log.Fatalf("error loading json config: %s\n", err)
 	}
 
-	if *ch {
+	generate(0, []*structToken{}, "tmpl/database.tmpl", "sqlcontext")
+	generate(0, []*structToken{}, "tmpl/initdb.tmpl", "dbinit")
+	if changeFeed {
 		generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
 	}
 	generate(inputLevel, filterQueries(structToks), "tmpl/orminit.tmpl", "init")
@@ -326,6 +331,8 @@ func generate(mLevel int, data []*structToken, tmpl, tmplName string) {
 	fileName := fmt.Sprintf("%s_%s_%d.%s", baseFileName, tmplName, mLevel, ext)
 
 	switch tmplName {
+	case "dbinit":
+	case "sqlcontext":
 	case "entity":
 	case "changeset":
 	case "proto":
@@ -533,7 +540,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			}
 		}
 		if embeddedStruct == "" {
-			if ctx != nil && ctx.IsLink {
+			if ctx != nil && ctx.IsLink { //preserve some fields linktable
 				if strings.Contains(field.Name, "ID") {
 					if field.Name == "ID" {
 						name = baseName + ".LinkID"
@@ -567,6 +574,9 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 				Lazy:     field.Lazy,
 				JSON:     field.JSON,
 			}
+			if ctx != nil {
+				nf.Embedded = ctx.Embedded
+			}
 			if field.Name == "ID" && ctx != nil {
 				nf.Alias = ctx.Alias
 				nf.Fk = ctx.Fk
@@ -585,8 +595,15 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 		if (ctx != nil && ctx.Level >= maxLevel /*&& !ctx.IsLink*/) || maxLevel == 0 {
 			continue
 		}
-		nCtx := &context{Name: name, Level: lvl, Fk: fk, Alias: field.RelAlias, IsLink: false}
 		emb := structLookup[embeddedStruct]
+		nCtx := &context{
+			Name:     name,
+			Level:    lvl,
+			Fk:       fk,
+			Alias:    field.RelAlias,
+			IsLink:   false,
+			Embedded: emb.Embedded,
+		}
 		rel := &relation{
 			Field:       field.Name,
 			Table:       emb.Table,
@@ -603,6 +620,7 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			Delete:      field.Delete,
 			Lazy:        field.Lazy,
 			JSON:        field.JSON,
+			Embedded:    emb.Embedded,
 		}
 		if pRel != nil {
 			rel.ParentRelation = pRel
@@ -752,6 +770,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Etype       string
 		Dialect     string
 		Attributes  bool
+		ChangeFeed  bool
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
@@ -762,6 +781,7 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		Etype:       etype,
 		Dialect:     dialect,
 		Attributes:  attributes,
+		ChangeFeed:  changeFeed,
 	}
 
 	mTmpl, err := Asset(tmpl)

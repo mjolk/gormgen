@@ -8,7 +8,7 @@ import (
 	"database/sql" {{if or $psql $csql}}
 	"github.com/lib/pq"{{else}}
 	"github.com/go-sql-driver/mysql"{{end}}{{if $proto}}
-	"gitlab.com/astrotit/registration-api/uuid"{{else}}
+	"github.com/mjolk/uuid"{{else}}
 	"github.com/gofrs/uuid"{{end}}
 	"fmt"
 )
@@ -18,17 +18,17 @@ import (
 {{range .Tokens}}
 {{if $.AtMaxLevel}}{{$ent := .}}
 var {{.Name}}PropToSql = map[string]string{ {{range .Fields}}
-	"{{deproxyfy .Name}}":"{{updatealias $ent . .Alias}}.{{.Column}}",{{end}}
+	"{{deproxyfy .Name}}":"{{template embedfields $ent .}}",{{end}}
 }{{end}}
 
 {{ if .Composite}}
 
 func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
-	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN object_type o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if .IsManyToOne}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
+	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN object_type o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if and .IsManyToOne (not .Embedded)}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
 }
 
 func {{.Name}}Select_lvl{{itoa $level}}() string { {{$tok := .}}
-	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{updatealias $tok . .Alias}}.{{.Column}}{{end}}`
+	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{template embedfields $tok .}}{{end}}`
 }
 
 func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Name}}, error) {
@@ -106,6 +106,9 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 				{{if or .Relation.IsOneToMany .Relation.IsManyToMany}}if New{{tovar .Relation.FieldName}}ID { {{if .ParentRelation}}{{$parentlist := listfields .ParentRelation}}{{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}} = append({{if checkparent .ParentRelation}}{{typeprefix .ParentRelation ""}}{{.ParentRelation.Type}}.{{.Relation.Field}}{{else if ne $parentlist ""}}{{typeprefix .Relation $parentlist}}{{$parentlist}}.{{.Relation.Field}}{{else}}entity.{{.Relation.FieldName}}{{end}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{else}}
 				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{end}}
 		}{{end}}
+{{end}}
+{{define "embedfields"}}
+{{if .Embedded}}{{updatealias $ent . .Relation.Alias}}.{{.Relation.Table}}_{{.Column}}{{else}}{{updatealias $ent . .Alias}}.{{.Column}}{{end}}
 {{end}}
 
 
