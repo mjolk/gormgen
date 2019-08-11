@@ -6,45 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"path/filepath"
-	"sort"
 	"strings"
 )
-
-type ByIndex []*structToken
-
-func (a ByIndex) Len() int           { return len(a) }
-func (a ByIndex) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByIndex) Less(i, j int) bool { return a[i].Index < a[j].Index }
-
-func loadIndex() ([]string, error) {
-
-	c, err := ioutil.ReadFile("index.json")
-	if err != nil {
-		return []string{}, err
-	}
-	index := make([]string, 0)
-	if err := json.Unmarshal(c, &index); err != nil {
-		return []string{}, err
-	}
-	return index, nil
-}
-
-func indexObjects(objects *[]*structToken) error {
-	obs := *objects
-	index, err := loadIndex()
-	if err != nil {
-		return err
-	}
-	for i, name := range index {
-		for _, obj := range obs {
-			if obj.Name == name {
-				obj.Index = int64(i)
-			}
-		}
-	}
-	*objects = obs
-	return nil
-}
 
 func selectCfg() ([]string, error) {
 	files, err := filepath.Glob("**/*.json")
@@ -67,9 +30,9 @@ func loadFile(file string, cfgCh chan<- []*structToken, errCh chan<- error) {
 		return
 	}
 
-	prts := strings.Split(file, "/")
-	for i := range cts {
-		cts[i].Schema = prts[0]
+	if dialect == "postgresql" {
+		prts := strings.Split(file, "/")
+		schema = prts[0]
 	}
 	cfgCh <- cts
 }
@@ -111,9 +74,5 @@ func loadJSON() ([]*structToken, error) {
 			strings.Join(errs, "\n"))
 	}
 
-	if err := indexObjects(&structToks); err != nil {
-		return nil, err
-	}
-	sort.Sort(ByIndex(structToks))
 	return structToks, nil
 }

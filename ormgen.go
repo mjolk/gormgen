@@ -9,7 +9,6 @@ package main
 //go:generate go-bindata tmpl/
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -64,6 +63,10 @@ OPTIONS
 	ONETOMANY = "onetomany"
 	//MANYTOONE relation type
 	MANYTOONE = "manytoone"
+
+	POSTGRESQL = "postgresql"
+	MYSQL      = "mysql"
+	COCKROACH  = "csql"
 )
 
 type SQLIndex struct {
@@ -95,7 +98,7 @@ type fieldToken struct {
 	Lazy        bool   `json:"lazy"`
 	JSON        string `json:"json"`
 	Normalize   bool   `json:"normalize"`
-	Embedded    bool
+	Embedded    bool   `json:"embedded"`
 }
 
 type structToken struct {
@@ -109,11 +112,9 @@ type structToken struct {
 	Alias        string `json:"alias"`
 	LinkEntity   bool
 	CompositeKey []string   `json:"compositeKey"`
-	Schema       string     `json:"schema"`
 	Query        bool       `json:"query"`
 	ChangeSet    []string   `json:"changeset"`
 	SQLIndex     []SQLIndex `json:"indexes"`
-	Embedded     bool       `json:"embedded"`
 }
 
 type context struct {
@@ -150,7 +151,6 @@ type relation struct {
 	To             string
 	LinkFrom       string
 	LinkTo         string
-	IsAttribute    bool
 	IsRoot         bool
 	Fields         []*fieldToken
 	LinkRelation   bool
@@ -218,6 +218,7 @@ var (
 	changeFeed    = false
 	dialect       = "postgresql"
 	attributes    = false
+	schema        string
 )
 
 func main() {
@@ -229,7 +230,7 @@ func main() {
 	help := flag.Bool("h", false, "")
 	otype := flag.String("t", "go", "entity type")
 	ch := flag.Bool("change", false, "generate change event system")
-	d := flag.String("d", "postgresql", "select sql dialect")
+	d := flag.String("d", POSTGRESQL, "select sql dialect")
 	attr := flag.Bool("attr", false, "enable attributes")
 	flag.IntVar(max, "level", 3, "max recursion level")
 	flag.StringVar(otype, "etype", "go", "")
@@ -272,7 +273,7 @@ func main() {
 		log.Fatalf("error loading json config: %s\n", err)
 	}
 
-	generate(0, []*structToken{}, "tmpl/database.tmpl", "sqlcontext")
+	generate(0, []*structToken{}, "tmpl/database.tmpl", "driver")
 	generate(0, []*structToken{}, "tmpl/initdb.tmpl", "dbinit")
 	if changeFeed {
 		generate(inputLevel, structToks, "tmpl/ormchangeset.tmpl", "changeset")
@@ -290,6 +291,42 @@ func main() {
 	}
 }
 
+type byDependency func(s1, s2 *structToken) bool
+
+type depSorter struct {
+	tokens []*structToken
+	by     byDependency
+}
+
+func (by byDependency) Sort(tks []*structToken) {
+	ds := &depSorter{
+		tokens: tks,
+		by:     by,
+	}
+	sort.Sort(ds)
+}
+
+func (d *depSorter) Len() int {
+	return len(d.tokens)
+}
+
+func (d *depSorter) Swap(i, j int) {
+	d.tokens[i], d.tokens[j] = d.tokens[j], d.tokens[i]
+}
+
+func (d *depSorter) Less(i, j int) bool {
+	return d.by(d.tokens[i], d.tokens[j])
+}
+
+func isInRelations(s1, s2 *structToken) bool {
+	for _, rel := range s2.RootRelations() {
+		if s1.Name == rel.Type {
+			return true
+		}
+	}
+	return false
+}
+
 func generateMetadata(src []*structToken) []*structToken {
 	newStructToks = make([]*structToken, len(src))
 	for i, structTk := range src {
@@ -301,7 +338,6 @@ func generateMetadata(src []*structToken) []*structToken {
 			Alias:        structTk.Alias,
 			IDColumn:     structTk.IDColumn,
 			CompositeKey: structTk.CompositeKey,
-			Schema:       structTk.Schema,
 			SQLIndex:     structTk.SQLIndex,
 		}
 		parse(newStructTk, structTk, nil, nil)
@@ -317,6 +353,7 @@ func generateMetadata(src []*structToken) []*structToken {
 		proxyfy(newStructTk)
 		newStructToks[i] = newStructTk
 	}
+	byDependency(isInRelations).Sort(newStructToks)
 	return newStructToks
 
 }
@@ -602,31 +639,27 @@ func parse(res *structToken, src *structToken, pRel *relation, ctx *context) {
 			Fk:       fk,
 			Alias:    field.RelAlias,
 			IsLink:   false,
-			Embedded: emb.Embedded,
+			Embedded: field.Embedded,
 		}
 		rel := &relation{
-			Field:       field.Name,
-			Table:       emb.Table,
-			Alias:       field.RelAlias,
-			Type:        embeddedStruct,
-			IsAttribute: false,
-			Owner:       res,
-			FieldName:   name,
-			SQLType:     field.SQLType,
-			Primary:     field.Primary,
-			NotNull:     field.NotNull,
-			Unique:      field.Unique,
-			Default:     field.Default,
-			Delete:      field.Delete,
-			Lazy:        field.Lazy,
-			JSON:        field.JSON,
-			Embedded:    emb.Embedded,
+			Field:     field.Name,
+			Table:     emb.Table,
+			Alias:     field.RelAlias,
+			Type:      embeddedStruct,
+			Owner:     res,
+			FieldName: name,
+			SQLType:   field.SQLType,
+			Primary:   field.Primary,
+			NotNull:   field.NotNull,
+			Unique:    field.Unique,
+			Default:   field.Default,
+			Delete:    field.Delete,
+			Lazy:      field.Lazy,
+			JSON:      field.JSON,
+			Embedded:  field.Embedded,
 		}
 		if pRel != nil {
 			rel.ParentRelation = pRel
-		}
-		if embeddedStruct == "Attribute" {
-			rel.IsAttribute = true
 		}
 		if ctx != nil && ctx.IsLink {
 			rel.LinkRelation = true
@@ -750,9 +783,6 @@ func isRelation(ft *fieldToken) (bool, string) {
 }
 
 func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string) error {
-	if len(toks) < 1 {
-		return errors.New("no structs found")
-	}
 
 	fout, err := os.Create(outFile)
 	if err != nil {
@@ -769,8 +799,8 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		AtMaxLevel  bool
 		Etype       string
 		Dialect     string
-		Attributes  bool
 		ChangeFeed  bool
+		Schema      string
 	}{
 		PackageName: packageName,
 		Visibility:  "L",
@@ -780,8 +810,8 @@ func genFile(outFile string, toks []*structToken, lvl int, tmpl, tmplName string
 		AtMaxLevel:  lvl == inputLevel,
 		Etype:       etype,
 		Dialect:     dialect,
-		Attributes:  attributes,
 		ChangeFeed:  changeFeed,
+		Schema:      schema,
 	}
 
 	mTmpl, err := Asset(tmpl)

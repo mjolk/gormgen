@@ -267,7 +267,7 @@ func insert{{title .Name}}(ctx SQLContext, on string, entities ...*{{.Name}}) ([
 	if on != "" {
 		query = fmt.Sprintf("%s ON CONFLICT %s", query, on)
 	}
-	{{if or psql csql}}query = fmt.Sprintf("%s RETURNING {{.IDColumn}}", query)
+	{{if or $psql $csql}}query = fmt.Sprintf("%s RETURNING {{.IDColumn}}", query)
 	if(eCount == 1){
 		if err := ctx.QueryRow(query, values...).Scan(&returnIds[0]); err != nil {
 			return returnIds, err

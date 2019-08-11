@@ -9,7 +9,7 @@ import "fmt"
 const ( {{range .Tokens}} {{$natfields := ffilterslice .Fields}}{{$nlen := len $natfields | min1}}
 	{{.Name}}Table = `
 	create table if not exists {{$schema}}{{ .Table}}({{range $fi, $fld := $natfields}}
-	  {{if .Relation}}{{if or $psql $csql}}{{template "psqlrelation" .}}{{else}}{{template "mysqlrelation"}}{{end}}{{else }}{{.Column}} {{.SQLType}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if .Primary }} primary key{{else}}{{if .Delete}} on delete {{.Delete}}{{end}}{{if .Unique}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
+	  {{if and .Relation (not .Embedded)}}{{if or $psql $csql}}{{template "psqlrelation" relationargs . $.Dialect}}{{else}}{{template "mysqlrelation" relationargs . $.Dialect}}{{end}}{{else }}{{if .Embedded}}{{.Relation.Table}}_{{end}}{{.Column}} {{if .Embedded}}{{embedid .SQLType}}{{else}}{{.SQLType}}{{end}}{{if .Link}}{{lookuplink .Link}}{{end}}{{if and .Primary (not .Embedded)}} primary key{{else}}{{if .Delete}} on delete {{.Delete}}{{end}}{{if and .Unique (not .Embedded)}} unique{{end}}{{if .NotNull}} not null{{end}}{{if .Default}} default {{.Default}}{{end}}{{end}}{{end}}{{if lt $fi $nlen}},{{end}}{{end}}{{if .CompositeKey}},
 	  primary key({{range $fii, $ckd := .CompositeKey}}{{if $fii}},{{end}}{{.}}{{end}}){{end}}
 	);`
 {{if hassqlindexes .}} {{$table := .Table}}
@@ -27,8 +27,10 @@ var indexes = []string{ {{range .Tokens}}{{if hassqlindexes .}}{{range .SQLIndex
 	{{.Name}}Index,{{end}}{{end}}{{end}}
 }
 
+var schema = "{{$.Schema}}"
+
 //TODO enable whitelisting
-func New(schema string, st []string) []string {
+func New(st []string) []string {
 	tstrings := make([]string, len(tables)+len(indexes))
 	for i, table := range tables {
 		tstrings[i] = fmt.Sprintf(table, schema)
@@ -41,7 +43,7 @@ func New(schema string, st []string) []string {
 
 var Setup []string
 
-func InitSchema(schema string) []string {
+func InitSchema() []string {
 	if schema != "" {
 		for idx, query := range Setup {
 			Setup[idx] = fmt.Sprintf(query, schema)
@@ -49,25 +51,7 @@ func InitSchema(schema string) []string {
 	}
         return Setup
 }
-
-{{template "schema" schemarg .Tokens}}
-{{if $.Attributes}}{{template "setup" .}}{{end}}
 {{end}}
-
-{{define "schema"}}
-{{range .}}
-var {{title .Schema}}Schema  = []string{ {{range .Tables}}
-	"{{ .Name}}",{{end}}
-}{{end}}
-{{end}}
-{{define "psqlrelation"}}{{.Relation.From}} {{.Relation.SQLType}} references {{$schema}}{{.Relation.Table}}({{.Relation.To}}){{if .Delete}} on delete {{.Delete}}{{end}}{{if .Relation.NotNull}} not null{{end}}{{end}}
-{{define "mysqlrelation"}}{{.Relation.From}} {{.Relation.SQLType}} {{if .Relation.NotNull}} not null{{end}},
-foreign key ({{.Relation.From}}) references {{.Relation.Table}}({{.Relation.To}}){{if .Delete}} on delete {{.Delete}}{{end}}{{end}}
-{{define "setup"}}
-var typeSetup = `
-insert into %s.object_type values {{range $i , $val := .Tokens}}
-	{{if $i}},{{end}}(default, '{{.Name}}', '{{.Name}}'){{end}};
-`
-{{end}}
-{{define "index"}}
-{{end}}
+{{define "psqlrelation"}}{{$schema := setschema .Dialect}}{{.Field.Relation.From}} {{.Field.Relation.SQLType}} references {{$schema}}{{.Field.Relation.Table}}({{.Field.Relation.To}}){{if .Field.Delete}} on delete {{.Field.Delete}}{{end}}{{if .Field.Relation.NotNull}} not null{{end}}{{end}}
+{{define "mysqlrelation"}}{{.Field.Relation.From}} {{.Field.Relation.SQLType}} {{if .Field.Relation.NotNull}} not null{{end}},
+foreign key ({{.Field.Relation.From}}) references {{.Field.Relation.Table}}({{.Field.Relation.To}}){{if .Field.Delete}} on delete {{.Field.Delete}}{{end}}{{end}}

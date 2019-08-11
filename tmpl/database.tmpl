@@ -2,12 +2,11 @@
 package {{.PackageName}}
 
 {{$psql := psql $.Dialect}}
-{{$mysql := msql $.Dialect}}
+{{$msql := msql $.Dialect}}
 {{$csql := csql $.Dialect}}
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"fmt"
 	"log"
 	"time"
@@ -17,7 +16,6 @@ import (
 	uuid "github.com/gofrs/uuid" {{if or $psql $csql}}
 	_ "github.com/lib/pq" //import pq driver{{else}}
 	_ "github.com/go-sql-driver/mysql"{{end}}
-	"gitlab.com/astrotit/registration-api/net"
 )
 
 type dbConfig struct {
@@ -25,14 +23,14 @@ type dbConfig struct {
 	Db       string
 	Dbuser   string
 	Password string
-	Parameters []string
+	Params []string
 	Schema string
 }
 
 func (cfg dbConfig) parameters() string {
 	parameters := ""
-	if len(dbConfig.Parameters) > 0 {
-		parameters += "?" + strings.Join(dbConfig.Parameters, "&")
+	if len(cfg.Params) > 0 {
+		parameters += "?" + strings.Join(cfg.Params, "&")
 	}
 	return parameters
 }
@@ -154,12 +152,12 @@ func Dbase() *sql.DB {
 	return dbio
 }
 
-func openConnection(dbconfig dbConfig) {
+func openConnection() {
 	log.Printf(
 		"user=%s dbname=%s host=%s sslmode=disable",
 		cfg.Dbuser,
 		cfg.Db,
-		cfg.Host
+		cfg.Host,
 	)
 	var err error
 	dbio, err = sql.Open(

@@ -18,17 +18,17 @@ import (
 {{range .Tokens}}
 {{if $.AtMaxLevel}}{{$ent := .}}
 var {{.Name}}PropToSql = map[string]string{ {{range .Fields}}
-	"{{deproxyfy .Name}}":"{{template embedfields $ent .}}",{{end}}
+	"{{deproxyfy .Name}}":`{{- template "embedfields" efields $ent . -}}`,{{end}}
 }{{end}}
 
 {{ if .Composite}}
 
 func {{.Name}}From_lvl{{itoa $level}}() string { {{$basetpe := .Name}}
-	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{if .IsAttribute}}(SELECT a.* FROM attribute a INNER JOIN object_type o ON a.obj_id = o.obj_id WHERE o.name = '{{.ParentName}}' ) AS {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{else}}{{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if and .IsManyToOne (not .Embedded)}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
+	return `FROM {{.Table}} {{.Alias}}{{range .Relations}}{{if .IsOneToMany }} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{if .IsManyToMany}} LEFT JOIN {{.LinkTable}} {{.LinkAlias}} ON {{.ParentAlias}}.{{.From}} = {{.LinkAlias}}.{{.To}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.LinkAlias}}.{{.LinkFrom}} = {{.Alias}}.{{.LinkTo}}{{end}}{{if and .IsManyToOne (not .Embedded)}} LEFT JOIN {{.Table}} {{.Alias}} ON {{.ParentAlias}}.{{.From}} = {{.Alias}}.{{.To}}{{end}}{{end}}`
 }
 
 func {{.Name}}Select_lvl{{itoa $level}}() string { {{$tok := .}}
-	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{template embedfields $tok .}}{{end}}`
+	return `SELECT {{range $fi, $fld := .Fields}}{{if $fi}}, {{end}}{{template "embedfields" efields $tok .}}{{end}}`
 }
 
 func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Name}}, error) {
@@ -107,9 +107,7 @@ func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{
 				entity.{{.RootRelation.FieldName}} = append(entity.{{.RootRelation.FieldName}}, {{typeprefix .Relation ""}}{{.Relation.Type}})}{{end}}
 		}{{end}}
 {{end}}
-{{define "embedfields"}}
-{{if .Embedded}}{{updatealias $ent . .Relation.Alias}}.{{.Relation.Table}}_{{.Column}}{{else}}{{updatealias $ent . .Alias}}.{{.Column}}{{end}}
-{{end}}
+{{define "embedfields"}}{{if .Field.Embedded}}{{.Field.Relation.ParentAlias}}.{{.Field.Relation.Table}}_{{.Field.Column}}{{else}}{{updatealias .Token .Field .Field.Alias}}.{{.Field.Column}}{{end}}{{end}}
 
 
 

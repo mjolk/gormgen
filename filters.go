@@ -64,7 +64,6 @@ var (
 		"norel":             FilterRelations,
 		"tovar":             FieldToVariableName,
 		"relarg":            RelationLevel,
-		"schemarg":          Schemarg,
 		"switch2fk":         SwitchToFK,
 		"ffiltersliceandid": FilterSliceAndID,
 		"ffilterslice":      FilterSlice,
@@ -89,6 +88,7 @@ var (
 		"versioned":         Versioned,
 		"islinked":          LinkedEntity,
 		"hassqlindexes":     HasSQLIndexes,
+		"relationargs":      RelationArguments,
 		"plus1": func(x int) int {
 			return x + 1
 		},
@@ -103,8 +103,27 @@ var (
 		"csql":      IsCockroach,
 		"setschema": SetSchema,
 		"efields":   EmbedFields,
+		"embedid":   EmbedIdColumnType,
 	}
 )
+
+func EmbedIdColumnType(sqlType string) string {
+	if strings.Contains(sqlType, "serial") ||
+		strings.Contains(sqlType, "identity") ||
+		strings.Contains(sqlType, "auto") {
+		return sqlType[0:strings.Index(sqlType, " ")]
+	}
+	return sqlType
+}
+
+type RelationArgs struct {
+	Field   *fieldToken
+	Dialect string
+}
+
+func RelationArguments(field *fieldToken, dialect string) RelationArgs {
+	return RelationArgs{field, dialect}
+}
 
 type EFieldsArgs struct {
 	Token *structToken
@@ -459,33 +478,6 @@ func RelationLevel(token *structToken, relation, parent, root *relation) Relatio
 	}
 }
 
-type Schema struct {
-	Schema string
-	Tables []*structToken
-}
-
-func updateSchema(schema *[]Schema, sch *structToken) {
-	rs := *schema
-	defer func() {
-		*schema = rs
-	}()
-	for i := range rs {
-		if rs[i].Schema == sch.Schema {
-			rs[i].Tables = append(rs[i].Tables, sch)
-			return
-		}
-	}
-	rs = append(rs, Schema{Schema: sch.Schema, Tables: []*structToken{sch}})
-}
-
-func Schemarg(tables []*structToken) []Schema {
-	schemas := make([]Schema, 0)
-	for _, table := range tables {
-		updateSchema(&schemas, table)
-	}
-	return schemas
-}
-
 func SwitchToFK(field *fieldToken) string {
 	prts := strings.Split(field.Name, ".")
 	if len(prts) > 1 {
@@ -500,12 +492,13 @@ func SwitchToFK(field *fieldToken) string {
 func FilterSlice(fields []*fieldToken) []*fieldToken {
 	fts := make([]*fieldToken, 0)
 	for _, field := range fields {
+		fmt.Printf("field: %s embedded: %t\n", field.Name, field.Embedded)
 		if strings.Contains(field.Name, "proxy") {
 			continue
 		}
 		prts := strings.Split(field.Name, ".")
 		if len(prts) > 1 {
-			if prts[1] == "ID" {
+			if prts[1] == "ID" || field.Embedded {
 				fts = append(fts, field)
 				continue
 			}

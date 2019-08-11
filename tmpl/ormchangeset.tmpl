@@ -90,11 +90,8 @@ func (e *{{.Name}}) GetUpdated() time.Time {
 
 func (e *{{.Name}}) SetUpdated() {}
 {{end}}
-{{range .Fields}}{{if eq .Name "Attributes"}}
-func (e *{{$curname}}) Attr() []*Attribute {
-	return e.Attributes
-}
-{{end}}{{end}}{{if gt (len $fields) 0}}
+{{range .Fields}}
+{{end}}{{if gt (len $fields) 0}}
 func (e *{{.Name}}) ChangeSet(
 	update *{{.Name}},
 	) (bool, []*ObjectChange) {
