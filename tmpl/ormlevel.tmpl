@@ -47,11 +47,12 @@ func {{$.Visibility}}oad{{title .Name}}_lvl{{itoa $level}}(rs *sql.Rows) (*{{.Na
 func {{$.Visibility}}oad{{title .Name}}s_lvl{{itoa $level}}(rs *sql.Rows) ([]*{{.Name}}, error) {
 	var err error
 	defer rs.Close()	
-	result := make([]*{{.Name}}, 0)
+	result := make([]*{{.Name}}, 0){{range $varid, $f := .Fields}}
+	var recv{{$varid}} {{ if isint $f.Type -}} sql.NullInt64{{ else if istime $f.Type -}}{{if $mysql}}mysql{{else}}pq{{end}}.NullTime{{else if isbool $f.Type -}}sql.NullBool{{else if isstring $f.Type -}}sql.NullString{{else if isuuid $f.Type}}uuid.NullUUID{{else if isbyte $f.Type}}&[]byte{}{{else -}}sql.RawBytes{{end}}{{end}}
+	dest := []interface{}{ {{range $varid, $f := .Fields}}
+		&recv{{$varid}},{{end}}
+	}
 	for rs.Next() {
-		dest := []interface{}{ {{range .Fields}}
-		{{ if isint .Type -}}new(sql.NullInt64){{ else if istime .Type -}}new({{if $mysql}}mysql{{else}}pq{{end}}.NullTime){{else if isbool .Type -}}new(sql.NullBool){{else if isstring .Type -}}new(sql.NullString){{else if isuuid .Type}}new(uuid.NullUUID){{else if isbyte .Type}}&[]byte{}{{else -}}new(sql.RawBytes){{end}},{{end}}
-		}
 		if err = rs.Scan(dest...); err != nil {
 			return nil, err
 		}
